@@ -83,6 +83,32 @@ export class Valuer {
     return null;
   }
 
+  /**
+   * Rough value for ranking issues only, never for reported figures: the nearest quote at
+   * any distance in time (earlier wins a tie), or the stated value converted via the
+   * nearest FX quote.
+   */
+  estimate(amount: AssetAmount, at: Timestamp): Decimal | null {
+    const quantity = dec(amount.quantity);
+    const near = this.nearest(amount.asset, at);
+    if (near) return quantity.times(dec(near.unitPrice));
+    const otherFiat = amount.value ? amount.value.currency : fiatCurrency(amount.asset);
+    const fx = otherFiat ? this.nearest(fiatAsset(otherFiat), at) : null;
+    if (fx) return (amount.value ? dec(amount.value.amount) : quantity).times(dec(fx.unitPrice));
+    return null;
+  }
+
+  private nearest(asset: AssetId, at: Timestamp): PriceQuote | null {
+    const list = this.index.get(asset);
+    if (!list || list.length === 0) return null;
+    const ms = parseInstant(at);
+    let best: IndexedQuote | null = null;
+    for (const q of list) {
+      if (!best || Math.abs(q.ms - ms) < Math.abs(best.ms - ms)) best = q;
+    }
+    return best ? best.quote : null;
+  }
+
   /** Latest quote at or before `at`, no older than a day. */
   private quote(asset: AssetId, at: Timestamp): PriceQuote | null {
     const list = this.index.get(asset);

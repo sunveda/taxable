@@ -123,6 +123,10 @@ export type IssueKind =
 /**
  * Something the user should review. `impact` is the plausible change to taxable amounts
  * if it's resolved, in the report currency; the fix queue is ordered by it.
+ *
+ * `impactKnown` is false when the engine has no basis for an estimate (e.g. no price for
+ * the asset anywhere). Such issues rank below issues with a known non-zero impact and
+ * above those known to be zero, so they are never buried at the bottom.
  */
 export interface Issue {
   id: string;
@@ -131,6 +135,7 @@ export interface Issue {
   asset: AssetId | null;
   taxYear: number;
   impact: { min: Decimal; max: Decimal };
+  impactKnown: boolean;
   /** Plain-language explanation. UI layers localize by `kind` + `params`. */
   message: string;
   params: Record<string, string>;

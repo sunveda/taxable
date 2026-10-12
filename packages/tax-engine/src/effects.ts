@@ -86,6 +86,7 @@ export type Effect =
       kind: IssueKind;
       asset: AssetId | null;
       impact: { min: Decimal; max: Decimal };
+      impactKnown: boolean;
       message: string;
       params: Record<string, string>;
     };
@@ -96,14 +97,39 @@ export interface EffectContext {
   reportingCurrency: string;
 }
 
-function missingPrice(amount: AssetAmount, eventId: EventId): Effect {
+/**
+ * How resolving a missing price would move taxable amounts:
+ * `raises`: a value counted as 0 should be positive (sale proceeds, taxable income);
+ * `either`: the effect could go either way (fees, basis of non-taxable receipts).
+ */
+type PriceEffect = 'raises' | 'either';
+
+function missingPrice(
+  ctx: EffectContext,
+  amount: AssetAmount,
+  at: Timestamp,
+  eventId: EventId,
+  effect: PriceEffect,
+): Effect {
+  const estimate = ctx.valuer.estimate(amount, at);
+  const params: Record<string, string> = {
+    asset: amount.asset,
+    quantity: amount.quantity,
+    eventId,
+  };
+  if (estimate) params['estimate'] = estimate.toFixed();
   return {
     type: 'issue',
     kind: 'missing_price',
     asset: amount.asset,
-    impact: { min: ZERO, max: ZERO },
-    message: `No price for ${amount.quantity} ${amount.asset}; valued at 0 until a price is provided.`,
-    params: { asset: amount.asset, quantity: amount.quantity, eventId },
+    impact: estimate
+      ? { min: effect === 'raises' ? ZERO : estimate.negated(), max: estimate }
+      : { min: ZERO, max: ZERO },
+    impactKnown: estimate !== null,
+    message: estimate
+      ? `No price for ${amount.quantity} ${amount.asset} at this time; valued at 0 until a price is provided (roughly ${estimate.toFixed(2)} ${ctx.reportingCurrency} from the nearest known price).`
+      : `No price for ${amount.quantity} ${amount.asset}; valued at 0 until a price is provided. Impact unknown.`,
+    params,
   };
 }
 
@@ -113,10 +139,11 @@ function valueOrIssue(
   at: Timestamp,
   eventId: EventId,
   out: Effect[],
+  effect: PriceEffect,
 ): Decimal {
   const v = ctx.valuer.value(amount, at);
   if (v) return v.value;
-  out.push(missingPrice(amount, eventId));
+  out.push(missingPrice(ctx, amount, at, eventId, effect));
   return ZERO;
 }
 
@@ -181,13 +208,13 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
       if (v) {
         tradeValue = v.value;
       } else {
-        out.push(missingPrice(receivedFiat ? e.sent : e.received, e.id));
+        out.push(missingPrice(ctx, receivedFiat ? e.sent : e.received, at, e.id, 'raises'));
         tradeValue = ZERO;
       }
 
       let feeValue = ZERO;
       if (e.fee && !dec(e.fee.quantity).isZero()) {
-        feeValue = valueOrIssue(ctx, e.fee, at, e.id, out);
+        feeValue = valueOrIssue(ctx, e.fee, at, e.id, out, 'either');
         // Trade fees are trade costs (basis/proceeds below), not separate expenses.
         out.push(...feeEffects(ctx, e.accountId, e.fee, feeValue, { asExpense: false }));
       }
@@ -225,7 +252,7 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
 
     case 'transfer': {
       if (e.fee && !dec(e.fee.quantity).isZero()) {
-        const feeValue = valueOrIssue(ctx, e.fee, at, e.id, out);
+        const feeValue = valueOrIssue(ctx, e.fee, at, e.id, out, 'either');
         out.push(...feeEffects(ctx, e.fromAccountId, e.fee, feeValue, { asExpense: true }));
       }
       if (!isFiat(e.asset)) {
@@ -243,7 +270,16 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
     case 'income': {
       const treatment = ctx.rules.income[e.incomeType];
       const needsValue = treatment.taxableAtReceipt || treatment.basis === 'fair_market_value';
-      const value = needsValue ? valueOrIssue(ctx, e.received, at, e.id, out) : ZERO;
+      const value = needsValue
+        ? valueOrIssue(
+            ctx,
+            e.received,
+            at,
+            e.id,
+            out,
+            treatment.taxableAtReceipt ? 'raises' : 'either',
+          )
+        : ZERO;
       out.push({
         type: 'income',
         accountId: e.accountId,
@@ -270,7 +306,7 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
     }
 
     case 'fee': {
-      const feeValue = valueOrIssue(ctx, e.fee, at, e.id, out);
+      const feeValue = valueOrIssue(ctx, e.fee, at, e.id, out, 'either');
       out.push(...feeEffects(ctx, e.accountId, e.fee, feeValue, { asExpense: true }));
       return out;
     }
@@ -288,6 +324,7 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
             kind: 'basis_currency_mismatch',
             asset: e.received.asset,
             impact: { min: ZERO, max: ZERO },
+            impactKnown: true,
             message: `Cost basis is in ${e.costBasis.currency}, but this report is in ${ctx.reportingCurrency}. Treated as unknown.`,
             params: { currency: e.costBasis.currency },
           });
@@ -301,6 +338,7 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
           asset: e.received.asset,
           // Zero basis overstates later gains by up to roughly the value on arrival.
           impact: { min: market ? market.value.negated() : ZERO, max: ZERO },
+          impactKnown: market !== null,
           message: `Cost basis unknown for ${e.received.quantity} ${e.received.asset} received from an external wallet; assumed 0.`,
           params: { asset: e.received.asset, quantity: e.received.quantity },
         });

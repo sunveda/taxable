@@ -69,7 +69,11 @@ function FixQueue({ result, pack }: { result: CalculationResult; pack: RulePack 
         return (
           <li key={i.id}>
             <span className="warn">
-              {swing.isZero() ? 'Review' : `Up to ${money(swing.abs(), pack)}`}
+              {!i.impactKnown
+                ? 'Impact unknown'
+                : swing.isZero()
+                  ? 'Review'
+                  : `Up to ${money(swing.abs(), pack)}`}
             </span>{' '}
             — {i.message}
           </li>

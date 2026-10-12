@@ -87,6 +87,7 @@ export function calculate(input: CalculationInput): CalculationResult {
           asset,
           taxYear: input.taxYear,
           impact: { min: ZERO, max: ZERO },
+          impactKnown: true,
           message: `${requested} is not available for ${asset} under ${pack.name}; using ${method}.`,
           params: { requested, used: method },
         },
@@ -158,6 +159,7 @@ export function calculate(input: CalculationInput): CalculationResult {
           asset: p.asset,
           taxYear: year,
           impact: { min: ZERO, max: ZERO },
+          impactKnown: true,
           message: `Opening position for ${p.asset} is dated after earlier activity; with pooled basis it is added as an acquisition, not a replacement.`,
           params: { asOf: p.asOf },
         },
@@ -222,7 +224,7 @@ export function calculate(input: CalculationInput): CalculationResult {
     item: Item,
     asset: AssetId,
     shortfall: Decimal,
-    impactMin: Decimal,
+    impactMin: Decimal | null,
     what: string,
   ): void => {
     addIssue(
@@ -231,7 +233,8 @@ export function calculate(input: CalculationInput): CalculationResult {
         eventIds: item.eventId ? [item.eventId] : [],
         asset,
         taxYear: item.year,
-        impact: { min: impactMin, max: ZERO },
+        impact: { min: impactMin ?? ZERO, max: ZERO },
+        impactKnown: impactMin !== null,
         message: `${what} ${shortfall.toString()} ${asset} more than the history shows was held; that part is given a cost basis of 0. Import missing history or add an opening balance.`,
         params: { asset, shortfall: shortfall.toString() },
       },
@@ -365,7 +368,7 @@ export function calculate(input: CalculationInput): CalculationResult {
             item,
             eff.asset,
             shortfall,
-            market ? market.value.negated() : ZERO,
+            market ? market.value.negated() : null,
             'Transfers',
           );
           dest.add(
@@ -390,7 +393,7 @@ export function calculate(input: CalculationInput): CalculationResult {
         const { parts, shortfall } = poolFor(eff.accountId, eff.asset).take(eff.quantity);
         adjustPhysical(eff.accountId, eff.asset, eff.quantity.negated());
         const removedBasis = parts.reduce((acc, p) => acc.plus(p.costBasis), ZERO);
-        if (!shortfall.isZero()) shortfallIssue(item, eff.asset, shortfall, ZERO, 'Sends');
+        if (!shortfall.isZero()) shortfallIssue(item, eff.asset, shortfall, null, 'Sends');
         const potentialGain = eff.marketValue ? eff.marketValue.minus(removedBasis) : ZERO;
         addIssue(
           {
@@ -399,6 +402,7 @@ export function calculate(input: CalculationInput): CalculationResult {
             asset: eff.asset,
             taxYear: item.year,
             impact: { min: ZERO, max: potentialGain.isPositive() ? potentialGain : ZERO },
+            impactKnown: eff.marketValue !== null,
             message: `${eff.quantity.toString()} ${eff.asset} left to a wallet that isn't connected. Treated as a move to your own wallet (not taxable). If it was a payment or sale, it is taxable.`,
             params: { asset: eff.asset, quantity: eff.quantity.toString() },
           },
@@ -418,6 +422,7 @@ export function calculate(input: CalculationInput): CalculationResult {
               asset: eff.asset,
               taxYear: item.year,
               impact: { min: ZERO, max: ZERO },
+              impactKnown: false,
               message: `Declared lots for ${eff.asset} in ${eff.accountId} total ${declared.toString()}, but the history shows ${held.toString()} held at that time.`,
               params: {
                 declared: declared.toString(),

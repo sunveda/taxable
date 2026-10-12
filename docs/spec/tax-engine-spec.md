@@ -134,12 +134,23 @@ type Issue = {
   id; kind: IssueKind;            // missing_basis, unmatched_transfer, unknown_classification, missing_price, negative_balance, 1099da_mismatch, ...
   eventIds: EventId[];
   impact: { min: Money; max: Money };  // change in taxable amount across plausible resolutions
-  suggestedResolution?: Resolution;    // with confidence
+  impactKnown: boolean;                // false when there is nothing to estimate from
+  suggestedResolution?: Resolution;    // with confidence (planned; not in v0.1)
   explanation: string;                 // plain language, i18n key + params
 };
 ```
 
-- The queue is sorted by `max(|impact.min|, |impact.max|)`.
+- The queue has three tiers:
+  1. known, non-zero impact, sorted by `max(|impact.min|, |impact.max|)`;
+  2. **unknown impact** (could be large, so never buried);
+  3. known zero impact (informational).
+
+  Ties break by tax year, then id.
+- **Missing prices** are valued at 0 in every reported figure. For ranking only, impact is estimated from the nearest quote at any distance in time, or from the stated value via the nearest FX quote:
+  - unpriced proceeds or taxable income: `{0, estimate}`;
+  - fees and non-taxable receipts: `{−estimate, +estimate}`.
+
+  With no quote at all, the impact is unknown.
 - Dust-level issues are auto-resolved with the default resolution and logged.
 - **Negative balance** issues (sold more than acquired) are a major source of errors in
   incumbents. Their impact assumes zero basis until resolved.
