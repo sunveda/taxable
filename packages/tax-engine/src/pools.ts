@@ -25,11 +25,18 @@ interface OpenLot {
   lot: Lot;
   remaining: Decimal;
   remainingBasis: Decimal;
+  /** Cost per unit, fixed at acquisition: partial consumption keeps the ratio. */
+  unitCost: Decimal;
   acquiredMs: number;
   seq: number;
 }
 
-/** FIFO, LIFO and HIFO: specific lots, consumed in a method-defined order. */
+/**
+ * FIFO, LIFO and HIFO: specific lots, consumed in a method-defined order.
+ *
+ * Lots are kept in consumption order as they're added (binary insertion), so `take()`
+ * only walks from the front instead of re-sorting every open lot on every disposal.
+ */
 export class LotPool implements Pool {
   private lots: OpenLot[] = [];
   private seq = 0;
@@ -49,19 +56,30 @@ export class LotPool implements Pool {
 
   add(lot: Lot): void {
     if (lot.quantity.isZero()) return;
-    this.lots.push({
+    const open: OpenLot = {
       lot,
       remaining: lot.quantity,
       remainingBasis: lot.costBasis,
+      unitCost: lot.costBasis.dividedBy(lot.quantity),
       acquiredMs: parseInstant(lot.acquiredAt),
       seq: this.seq++,
-    });
+    };
+    // Upper bound: insert after every lot that is consumed no later than this one.
+    let lo = 0;
+    let hi = this.lots.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this.compare(open, this.lots[mid]!) < 0) hi = mid;
+      else lo = mid + 1;
+    }
+    this.lots.splice(lo, 0, open);
   }
 
   take(quantity: Decimal): { parts: ConsumedPart[]; shortfall: Decimal } {
     const parts: ConsumedPart[] = [];
     let needed = quantity;
-    for (const open of this.ordered()) {
+    let consumed = 0;
+    for (const open of this.lots) {
       if (needed.isZero()) break;
       const used = Decimal.min(needed, open.remaining);
       // Use the exact remaining basis on full consumption so no dust is left behind.
@@ -71,6 +89,7 @@ export class LotPool implements Pool {
       open.remaining = open.remaining.minus(used);
       open.remainingBasis = open.remainingBasis.minus(basis);
       needed = needed.minus(used);
+      if (open.remaining.isZero()) consumed++;
       parts.push({
         lotId: open.lot.id,
         quantity: used,
@@ -78,7 +97,8 @@ export class LotPool implements Pool {
         acquiredAt: open.lot.acquiredAt,
       });
     }
-    this.lots = this.lots.filter((l) => !l.remaining.isZero());
+    // Only a prefix can be fully consumed, because lots are taken in order.
+    if (consumed > 0) this.lots.splice(0, consumed);
     return { parts, shortfall: needed };
   }
 
@@ -86,22 +106,16 @@ export class LotPool implements Pool {
     this.lots = [];
   }
 
-  /** Deterministic consumption order; ties fall back to insertion order. */
-  private ordered(): OpenLot[] {
-    const byAcquired = (a: OpenLot, b: OpenLot): number =>
-      a.acquiredMs - b.acquiredMs || a.seq - b.seq;
-    const copy = [...this.lots];
+  /** Negative when `a` is consumed before `b`. Ties fall back to insertion order. */
+  private compare(a: OpenLot, b: OpenLot): number {
+    const byAcquired = a.acquiredMs - b.acquiredMs || a.seq - b.seq;
     switch (this.method) {
       case 'FIFO':
-        return copy.sort(byAcquired);
+        return byAcquired;
       case 'LIFO':
-        return copy.sort((a, b) => -byAcquired(a, b));
+        return -byAcquired;
       case 'HIFO':
-        return copy.sort((a, b) => {
-          const unitA = a.remainingBasis.dividedBy(a.remaining);
-          const unitB = b.remainingBasis.dividedBy(b.remaining);
-          return unitB.comparedTo(unitA) || byAcquired(a, b);
-        });
+        return b.unitCost.comparedTo(a.unitCost) || byAcquired;
     }
   }
 }

@@ -25,6 +25,8 @@ function incomeTypeFromLabel(label: string): IncomeType | null {
 interface Side {
   asset: string;
   quantity: Decimal;
+  /** JPY value of this amount, when the file states it. */
+  valueJpy?: Decimal;
 }
 
 /**
@@ -49,7 +51,12 @@ function rowToEvents(args: {
     asset: normalizeTicker(s.asset),
     quantity: s.quantity.abs().toFixed(),
   });
-  const feeAmt = fee && !fee.quantity.isZero() ? amt(fee) : undefined;
+  const feeAmt =
+    fee && !fee.quantity.isZero()
+      ? fee.valueJpy && !isFiatTicker(fee.asset)
+        ? { ...amt(fee), value: { amount: fee.valueJpy.toFixed(), currency: 'JPY' } }
+        : amt(fee)
+      : undefined;
   const valued = (a: AssetAmount): AssetAmount =>
     increaseValueJpy ? { ...a, value: { amount: increaseValueJpy.toFixed(), currency: 'JPY' } } : a;
 
@@ -265,13 +272,17 @@ export const bitflyerCsv: CsvImporter = {
         continue;
       }
 
-      // Fee: prefer the explicit JPY column; otherwise assume 手数料 is in 通貨1.
+      // Fee: 手数料 is the fee as charged (assumed to be in 通貨1); 手数料(JPY), when present,
+      // is its yen value. A crypto fee must stay crypto so the units are deducted. Only when
+      // 手数料 is empty is the fee taken as yen.
       let fee: Side | null = null;
-      if (!feeJpy.isZero()) {
-        fee = { asset: 'JPY', quantity: feeJpy };
-      } else if (!feeQty.isZero() && c1) {
-        fee = { asset: c1, quantity: feeQty };
+      if (!feeQty.isZero() && c1) {
+        fee = isFiatTicker(c1)
+          ? { asset: c1, quantity: feeQty }
+          : { asset: c1, quantity: feeQty, ...(feeJpy.isZero() ? {} : { valueJpy: feeJpy }) };
         warnings.push({ line, code: 'assumption', message: '手数料 assumed to be in 通貨1.' });
+      } else if (!feeJpy.isZero()) {
+        fee = { asset: 'JPY', quantity: feeJpy };
       }
 
       const inc = increase[0] ?? null;

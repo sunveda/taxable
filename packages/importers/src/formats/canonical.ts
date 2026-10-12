@@ -60,6 +60,24 @@ export const canonicalCsv: CsvImporter = {
       const received = amount('received_asset', 'received_quantity');
       const fee = amount('fee_asset', 'fee_quantity');
       if (sent === null || received === null || fee === null) continue;
+      // Optional columns: a value that is present but unreadable is an error, never ignored
+      // (e.g. a malformed acquired_at would silently turn a long-term holding short-term).
+      const filled = (col: string): boolean => (cells[col] ?? '') !== '';
+      if (filled('value') && (!parseAmount(cells['value']) || !filled('value_currency'))) {
+        warn('invalid_number', 'value must be a number and needs value_currency.');
+        continue;
+      }
+      if (
+        filled('cost_basis') &&
+        (!parseAmount(cells['cost_basis']) || !filled('cost_basis_currency'))
+      ) {
+        warn('invalid_number', 'cost_basis must be a number and needs cost_basis_currency.');
+        continue;
+      }
+      if (filled('acquired_at') && !parseTimestamp(cells['acquired_at'], 'Z')) {
+        warn('invalid_timestamp', `Unreadable acquired_at "${cells['acquired_at'] ?? ''}".`);
+        continue;
+      }
       const feePart = fee ? { fee } : {};
       const sourceRef = `line ${line}`;
 

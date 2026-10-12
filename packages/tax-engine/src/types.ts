@@ -118,7 +118,8 @@ export type IssueKind =
   | 'method_not_allowed'
   | 'opening_position_mismatch'
   | 'opening_position_order'
-  | 'basis_currency_mismatch';
+  | 'basis_currency_mismatch'
+  | 'unsupported_history_year';
 
 /**
  * Something the user should review. `impact` is the plausible change to taxable amounts
@@ -178,6 +179,19 @@ export interface UsSummary {
    * waits on 1099-DA reconciliation and is not produced yet.
    */
   form8949: Form8949Line[];
+  /**
+   * Totals of the rounded Form 8949 lines (what carries to Schedule D), so they always
+   * equal the sum of the lines. `shortTerm`/`longTerm` above are the unrounded figures.
+   */
+  form8949Totals: { partI: Form8949Totals; partII: Form8949Totals };
+  /** `ordinaryIncome` rounded per the rule pack. */
+  reportedOrdinaryIncome: Decimal;
+}
+
+export interface Form8949Totals {
+  proceeds: Decimal;
+  costBasis: Decimal;
+  gain: Decimal;
 }
 
 export interface JpSummary {
@@ -193,6 +207,18 @@ export interface JpSummary {
   miscellaneousIncome: Decimal;
   /** Amount that adds to taxable income: a loss can't offset other income categories. */
   taxableMiscellaneousIncome: Decimal;
+  /**
+   * Figures for the return, rounded per the rule pack (whole yen, truncated). Each
+   * component is rounded first and the income is derived from the rounded components.
+   */
+  reported: {
+    /** 収入金額: disposal proceeds + income received. */
+    revenue: Decimal;
+    /** 必要経費: cost basis + selling costs + deductible expenses. */
+    necessaryExpenses: Decimal;
+    miscellaneousIncome: Decimal;
+    taxableMiscellaneousIncome: Decimal;
+  };
 }
 
 export interface CalculationResult {

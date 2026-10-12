@@ -11,7 +11,12 @@ import {
   type EventId,
   type Timestamp,
 } from '@svdt/domain';
-import type { CostBasisMethod, RuleId, YearRules } from '@svdt/rule-packs';
+import {
+  UnsupportedTaxYearError,
+  type CostBasisMethod,
+  type RuleId,
+  type YearRules,
+} from '@svdt/rule-packs';
 import {
   effectsOfEvent,
   effectsOfOpeningPosition,
@@ -103,7 +108,7 @@ export function calculate(input: CalculationInput): CalculationResult {
   const rulesFor = (year: number): YearRules => {
     let r = rulesCache.get(year);
     if (!r) {
-      r = pack.yearRules(year);
+      r = historyRules(year);
       if (r.basisScope !== scope) {
         throw new Error(
           `${pack.id}: basis scope changes between ${year} and ${input.taxYear}; not supported yet`,
@@ -113,6 +118,33 @@ export function calculate(input: CalculationInput): CalculationResult {
     }
     return r;
   };
+  /**
+   * Rules for a year of history. Years before the pack's first supported year (e.g. a 2013
+   * purchase under a pack that starts in 2014) use the earliest supported rules, and the
+   * fix queue says so, rather than failing the whole calculation.
+   */
+  function historyRules(year: number): YearRules {
+    try {
+      return pack.yearRules(year);
+    } catch (err) {
+      if (!(err instanceof UnsupportedTaxYearError) || year >= pack.supportedYears.from) throw err;
+      const fallback = pack.supportedYears.from;
+      addIssue(
+        {
+          kind: 'unsupported_history_year',
+          eventIds: [],
+          asset: null,
+          taxYear: year,
+          impact: { min: ZERO, max: ZERO },
+          impactKnown: false,
+          message: `${pack.name} rules for ${year} are not modelled; activity from ${year} was processed with the ${fallback} rules. Check the cost basis it carries forward.`,
+          params: { year: String(year), appliedYear: String(fallback) },
+        },
+        String(year),
+      );
+      return pack.yearRules(fallback);
+    }
+  }
   const ctxFor = (year: number): EffectContext => ({
     rules: rulesFor(year),
     valuer,
@@ -307,7 +339,21 @@ export function calculate(input: CalculationInput): CalculationResult {
           const c = costs[i] ?? ZERO;
           const term = termOf(rules, part.acquiredAt, item.timestamp);
           if (part.shortfall) {
-            shortfallIssue(item, eff.asset, part.quantity, p.minus(c).negated(), 'Disposes of');
+            // With unpriced proceeds, p − c is 0 only for lack of a price: fall back to an
+            // estimate of the units, or mark the impact unknown.
+            const est = eff.proceedsKnown
+              ? p.minus(c)
+              : valuer.estimate(
+                  { asset: eff.asset, quantity: part.quantity.toString() },
+                  item.timestamp,
+                );
+            shortfallIssue(
+              item,
+              eff.asset,
+              part.quantity,
+              est ? est.negated() : null,
+              'Disposes of',
+            );
           }
           if (!reportable) return;
           disposals.push({
@@ -360,17 +406,11 @@ export function calculate(input: CalculationInput): CalculationResult {
           dest.add(lot);
         });
         if (!shortfall.isZero()) {
-          const market = valuer.value(
+          const market = valuer.valueOrEstimate(
             { asset: eff.asset, quantity: shortfall.toString() },
             item.timestamp,
           );
-          shortfallIssue(
-            item,
-            eff.asset,
-            shortfall,
-            market ? market.value.negated() : null,
-            'Transfers',
-          );
+          shortfallIssue(item, eff.asset, shortfall, market ? market.negated() : null, 'Transfers');
           dest.add(
             newLot(
               {

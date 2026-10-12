@@ -127,6 +127,14 @@ Each event gets a **taxable meaning** from a closed set:
 - **Estimated tax** is shown as a range only, and only when the user provides bracket inputs.
   The primary output is **gains and income per bucket**.
 
+### 7.1 Report rounding
+Engine figures are exact (ADR-0008). Summaries also carry figures rounded per the rule pack:
+- **US:** each Form 8949 line is rounded, and `form8949Totals` (carried to Schedule D) is the sum of the rounded lines, so it always matches them. `shortTerm`/`longTerm` stay unrounded.
+- **Japan:** `reported` gives 収入金額, 必要経費 and 雑所得 in whole yen (truncated). Each component is rounded first, and the income is derived from the rounded components.
+
+### 7.2 History before a rule pack's first year
+Activity older than a pack's first supported year (e.g. a 2013 purchase under the `jp` pack, which starts at 2014) is processed with the earliest supported rules. An `unsupported_history_year` issue with unknown impact flags it, because the basis it carries forward needs checking. A **tax year** outside the pack's range is still refused.
+
 ## 8. Fix queue (issue model)
 
 ```ts
@@ -146,6 +154,7 @@ type Issue = {
   3. known zero impact (informational).
 
   Ties break by tax year, then id.
+- **Trade fees paid in crypto** are applied after the trade's acquisition, so a fee charged in the asset just received comes out of those units.
 - **Missing prices** are valued at 0 in every reported figure. For ranking only, impact is estimated from the nearest quote at any distance in time, or from the stated value via the nearest FX quote:
   - unpriced proceeds or taxable income: `{0, estimate}`;
   - fees and non-taxable receipts: `{−estimate, +estimate}`.

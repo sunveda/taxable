@@ -2,7 +2,7 @@ import type { AssetAmount, LedgerEvent } from '@svdt/domain';
 import { isFiatTicker, normalizeTicker } from '../assets';
 import type { CsvTable } from '../csv';
 import type { CsvImporter, ImportContext, ImportResult, ImportWarning } from '../types';
-import { parseAmount, parseTimestamp } from '../values';
+import { parseAmount, parseTimestamp, RowIds } from '../values';
 import { countLines } from './canonical';
 
 /**
@@ -59,8 +59,11 @@ export const coinbaseCsv: CsvImporter = {
     const warnings: ImportWarning[] = [];
     let skipped = 0;
     const accountId = ctx.accountId;
+    // Rows without an ID get a content hash, which stays stable across overlapping exports
+    // (a position-based id would change and duplicate the transaction on re-import).
+    const rowIds = new RowIds(`coinbase:${accountId}`);
 
-    table.rows.forEach(({ line, cells }, index) => {
+    table.rows.forEach(({ line, cells }) => {
       const warn = (code: ImportWarning['code'], message: string): void => {
         warnings.push({ line, code, message });
       };
@@ -77,7 +80,7 @@ export const coinbaseCsv: CsvImporter = {
       const subtotal = parseAmount(cells['Subtotal'])?.abs() ?? null;
       const fees = parseAmount(cells['Fees and/or Spread'])?.abs() ?? null;
       if (!qty) return warn('invalid_number', 'Quantity Transacted is missing or not a number.');
-      const id = `coinbase:${accountId}:${cells['ID'] || `${timestamp}:${index}`}`;
+      const id = cells['ID'] ? `coinbase:${accountId}:${cells['ID']}` : rowIds.next(cells);
       const sourceRef = `line ${line}`;
 
       // Market value of the row in the price currency, when that is fiat.

@@ -127,12 +127,14 @@ flowchart LR
 
 | Issue | Impact |
 |---|---|
-| `negative_balance` (sale) | −(proceeds of uncovered units) |
-| `negative_balance` (transfer / send) | market value if known, else unknown |
-| `missing_basis` | −(market value on arrival) if known, else unknown |
-| `missing_price` | estimate from the nearest quote, else unknown |
-| `unmatched_withdrawal` | + gain if it were a sale, if a market value is known, else unknown |
+| `negative_balance` (sale) | −(proceeds of uncovered units); if proceeds were unpriced, the nearest-price estimate; else unknown |
+| `negative_balance` (transfer) | market value, or nearest-price estimate, else unknown |
+| `negative_balance` (send to unknown wallet) | unknown |
+| `missing_basis` | −(market value on arrival, or nearest-price estimate), else unknown |
+| `missing_price` | nearest-price estimate, else unknown |
+| `unmatched_withdrawal` | + gain if it were a sale (market value or estimate), else unknown |
 | `opening_position_mismatch` | unknown |
+| `unsupported_history_year` | unknown (old activity processed with the earliest supported rules) |
 | `method_not_allowed`, `opening_position_order`, `basis_currency_mismatch` | 0 (informational) |
 
 ## 6. Transfer matching (built)

@@ -40,6 +40,8 @@ export type Effect =
       quantity: Decimal;
       proceeds: Decimal;
       sellingCosts: Decimal;
+      /** False when proceeds or costs were valued at 0 for lack of a price. */
+      proceedsKnown: boolean;
       ruleRefs: RuleId[];
     }
   | {
@@ -140,11 +142,11 @@ function valueOrIssue(
   eventId: EventId,
   out: Effect[],
   effect: PriceEffect,
-): Decimal {
+): { value: Decimal; known: boolean } {
   const v = ctx.valuer.value(amount, at);
-  if (v) return v.value;
+  if (v) return { value: v.value, known: true };
   out.push(missingPrice(ctx, amount, at, eventId, effect));
-  return ZERO;
+  return { value: ZERO, known: false };
 }
 
 /** A fee paid in crypto disposes of the units (per rule pack) and may be a deductible expense. */
@@ -152,7 +154,7 @@ function feeEffects(
   ctx: EffectContext,
   accountId: AccountId,
   fee: AssetAmount,
-  feeValue: Decimal,
+  feeValue: { value: Decimal; known: boolean },
   opts: { asExpense: boolean },
 ): Effect[] {
   const out: Effect[] = [];
@@ -167,12 +169,19 @@ function feeEffects(
         accountId,
         asset: fee.asset,
         quantity,
-        proceeds: feeValue,
+        proceeds: feeValue.value,
         sellingCosts: ZERO,
+        proceedsKnown: feeValue.known,
         ruleRefs: [rule.rule],
       });
     } else {
-      out.push({ type: 'remove', accountId, asset: fee.asset, quantity, marketValue: null });
+      out.push({
+        type: 'remove',
+        accountId,
+        asset: fee.asset,
+        quantity,
+        marketValue: feeValue.known ? feeValue.value : null,
+      });
     }
   }
   if (opts.asExpense && rule.isDeductibleExpense) {
@@ -181,7 +190,7 @@ function feeEffects(
       accountId,
       asset: fee.asset,
       quantity,
-      value: feeValue,
+      value: feeValue.value,
       ruleRefs: [rule.rule],
     });
   }
@@ -201,6 +210,7 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
       // received, else what was given up.
       const reportFiat = `fiat:${ctx.reportingCurrency}`;
       let tradeValue: Decimal;
+      let tradeKnown = true;
       const fiatSide = [e.sent, e.received].find((a) => a.asset === reportFiat);
       const v = fiatSide
         ? ctx.valuer.value(fiatSide, at)
@@ -210,14 +220,14 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
       } else {
         out.push(missingPrice(ctx, receivedFiat ? e.sent : e.received, at, e.id, 'raises'));
         tradeValue = ZERO;
+        tradeKnown = false;
       }
 
-      let feeValue = ZERO;
+      let fee: { value: Decimal; known: boolean } = { value: ZERO, known: true };
       if (e.fee && !dec(e.fee.quantity).isZero()) {
-        feeValue = valueOrIssue(ctx, e.fee, at, e.id, out, 'either');
-        // Trade fees are trade costs (basis/proceeds below), not separate expenses.
-        out.push(...feeEffects(ctx, e.accountId, e.fee, feeValue, { asExpense: false }));
+        fee = valueOrIssue(ctx, e.fee, at, e.id, out, 'either');
       }
+      const feeValue = fee.value;
 
       if (!sentFiat) {
         out.push({
@@ -228,6 +238,7 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
           quantity: dec(e.sent.quantity),
           proceeds: tradeValue,
           sellingCosts: feeValue,
+          proceedsKnown: tradeKnown && fee.known,
           ruleRefs: [
             ...(receivedFiat ? [] : [ctx.rules.swap.rule]),
             ...(feeValue.isZero() ? [] : [ctx.rules.tradeFee.rule]),
@@ -246,6 +257,12 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
           origin: sentFiat ? 'purchase' : 'swap',
           ruleRefs: sentFiat && !feeValue.isZero() ? [ctx.rules.tradeFee.rule] : [],
         });
+      }
+      // The fee comes last: when it's paid in the asset just received, those units must
+      // exist before they can be spent. Trade fees are trade costs (basis/proceeds above),
+      // not separate expenses.
+      if (e.fee && !dec(e.fee.quantity).isZero()) {
+        out.push(...feeEffects(ctx, e.accountId, e.fee, fee, { asExpense: false }));
       }
       return out;
     }
@@ -278,7 +295,7 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
             e.id,
             out,
             treatment.taxableAtReceipt ? 'raises' : 'either',
-          )
+          ).value
         : ZERO;
       out.push({
         type: 'income',
@@ -331,13 +348,13 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
         }
       }
       if (basis === null) {
-        const market = ctx.valuer.value(e.received, at);
+        const market = ctx.valuer.valueOrEstimate(e.received, at);
         out.push({
           type: 'issue',
           kind: 'missing_basis',
           asset: e.received.asset,
           // Zero basis overstates later gains by up to roughly the value on arrival.
-          impact: { min: market ? market.value.negated() : ZERO, max: ZERO },
+          impact: { min: market ? market.negated() : ZERO, max: ZERO },
           impactKnown: market !== null,
           message: `Cost basis unknown for ${e.received.quantity} ${e.received.asset} received from an external wallet; assumed 0.`,
           params: { asset: e.received.asset, quantity: e.received.quantity },
@@ -358,13 +375,13 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
 
     case 'external_withdrawal': {
       if (isFiat(e.sent.asset)) return out;
-      const market = ctx.valuer.value(e.sent, at);
+      const market = ctx.valuer.valueOrEstimate(e.sent, at);
       out.push({
         type: 'remove',
         accountId: e.accountId,
         asset: e.sent.asset,
         quantity: dec(e.sent.quantity),
-        marketValue: market ? market.value : null,
+        marketValue: market,
       });
       return out;
     }

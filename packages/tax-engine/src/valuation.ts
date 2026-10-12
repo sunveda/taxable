@@ -83,6 +83,11 @@ export class Valuer {
     return null;
   }
 
+  /** The value if one is available, otherwise the ranking estimate. For issue impact only. */
+  valueOrEstimate(amount: AssetAmount, at: Timestamp): Decimal | null {
+    return this.value(amount, at)?.value ?? this.estimate(amount, at);
+  }
+
   /**
    * Rough value for ranking issues only, never for reported figures: the nearest quote at
    * any distance in time (earlier wins a tie), or the stated value converted via the

@@ -179,7 +179,8 @@ export const krakenLedgersCsv: CsvImporter = {
         extraFees.forEach((f, i) =>
           events.push(feeEvent(`${id}:fee${i + 2}`, f, accountId, sourceRef)),
         );
-        imported += group.length;
+        imported += real.length;
+        skipped += group.length - real.length; // KFEE fee-credit rows
         continue;
       }
 

@@ -5,6 +5,7 @@ import type {
   Disposal,
   ExpenseRecord,
   Form8949Line,
+  Form8949Totals,
   IncomeRecord,
   JpSummary,
   UsSummary,
@@ -34,7 +35,7 @@ export function summarize(
     case 'us_capital_gains':
       return summarizeUs(pack, records, timeZone);
     case 'jp_miscellaneous_income':
-      return summarizeJp(records);
+      return summarizeJp(pack, records);
   }
 }
 
@@ -58,16 +59,29 @@ function summarizeUs(pack: RulePack, { disposals, income }: Records, timeZone: s
       disposalId: d.id,
     };
   });
+  const totals = (part: 'I' | 'II'): Form8949Totals => {
+    const lines = form8949.filter((l) => l.part === part);
+    return {
+      proceeds: sum(lines.map((l) => l.proceeds)),
+      costBasis: sum(lines.map((l) => l.costBasis)),
+      gain: sum(lines.map((l) => l.gain)),
+    };
+  };
+  const ordinaryIncome = sum(income.filter((i) => i.taxable).map((i) => i.value));
   return {
     model: 'us_capital_gains',
     shortTerm: bucket(disposals.filter((d) => d.term !== 'long')),
     longTerm: bucket(disposals.filter((d) => d.term === 'long')),
-    ordinaryIncome: sum(income.filter((i) => i.taxable).map((i) => i.value)),
+    ordinaryIncome,
     form8949,
+    form8949Totals: { partI: totals('I'), partII: totals('II') },
+    reportedOrdinaryIncome: round(ordinaryIncome),
   };
 }
 
-function summarizeJp({ disposals, income, expenses }: Records): JpSummary {
+function summarizeJp(pack: RulePack, { disposals, income, expenses }: Records): JpSummary {
+  const { decimalPlaces, mode } = pack.reportRounding;
+  const round = (v: Decimal): Decimal => roundTo(v, decimalPlaces, mode);
   const byType: JpSummary['income'] = {};
   for (const i of income) {
     if (!i.taxable) continue;
@@ -77,6 +91,9 @@ function summarizeJp({ disposals, income, expenses }: Records): JpSummary {
   const incomeTotal = sum(Object.values(byType));
   const expenseTotal = sum(expenses.map((e) => e.value));
   const misc = d.gain.plus(incomeTotal).minus(expenseTotal);
+  const revenue = round(d.proceeds.plus(incomeTotal));
+  const necessaryExpenses = round(d.costBasis.plus(d.sellingCosts).plus(expenseTotal));
+  const reportedMisc = revenue.minus(necessaryExpenses);
   return {
     model: 'jp_miscellaneous_income',
     disposals: d,
@@ -85,5 +102,11 @@ function summarizeJp({ disposals, income, expenses }: Records): JpSummary {
     expenses: expenseTotal,
     miscellaneousIncome: misc,
     taxableMiscellaneousIncome: misc.isNegative() ? ZERO : misc,
+    reported: {
+      revenue,
+      necessaryExpenses,
+      miscellaneousIncome: reportedMisc,
+      taxableMiscellaneousIncome: reportedMisc.isNegative() ? ZERO : reportedMisc,
+    },
   };
 }
