@@ -60,7 +60,7 @@ interface Importer<Config> {
 - B2B: partner push, or scheduled pull per partner contract.
 - Jobs run on a Postgres-backed queue initially. See [ADR-0010](../adr/0010-postgres-primary-store.md).
 
-## 7. MVP source list (to finalize with launch jurisdiction)
-Decide after [ADR-0013](../adr/0013-launch-jurisdiction.md) is accepted. Pick the top 5–8 CEXs by
-user share in the launch market, plus generic CSV, BTC, EVM (Ethereum, Base, Arbitrum,
+## 7. MVP source list
+The launch market is the US ([ADR-0013](../adr/0013-launch-jurisdiction.md)). The exact list is
+finalized in the first importer PR: the top 5–8 US-available CEXs by user share, plus generic CSV, BTC, EVM (Ethereum, Base, Arbitrum,
 Optimism, Polygon, BNB Chain), and Solana.

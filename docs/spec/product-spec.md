@@ -114,7 +114,7 @@ The goal is to remove the main pricing complaint: **per-transaction tiers that c
 
 ## 9. Open questions
 
-1. **Launch jurisdiction.** US is proposed in [ADR-0013](../adr/0013-launch-jurisdiction.md); needs founder confirmation.
+1. ~~Launch jurisdiction~~ — decided: **US** ([ADR-0013](../adr/0013-launch-jurisdiction.md)).
 2. Brand and product name. "svdt-cloud" is the project codename; the repo is `taxable`.
 3. Tax-professional partner for rule-pack review (required before any public launch).
 4. Exchange design partners for B2B beta.

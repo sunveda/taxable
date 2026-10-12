@@ -16,5 +16,5 @@ Format and process: [ADR-0001](./0001-record-architecture-decisions.md). Templat
 | [0010](./0010-postgres-primary-store.md) | PostgreSQL primary store; object storage for raw blobs | Accepted |
 | [0011](./0011-api-first-multi-tenant.md) | API-first, multi-tenant from day one | Accepted |
 | [0012](./0012-explainability-and-provenance.md) | Every number has provenance | Accepted |
-| [0013](./0013-launch-jurisdiction.md) | Launch jurisdiction: United States first | **Proposed** |
+| [0013](./0013-launch-jurisdiction.md) | Launch jurisdiction: United States first | Accepted |
 | [0014](./0014-read-only-access-no-custody.md) | Read-only data access; no custody | Accepted |
