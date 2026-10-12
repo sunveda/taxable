@@ -26,7 +26,10 @@ export interface CalculationInput {
   };
   /** Taxpayer's IANA time zone. Only honoured when the rule pack takes it from the user. */
   timeZone?: string;
-  /** User/accountant corrections (ADR-0009), in any order. Latest active one per target wins. */
+  /**
+   * User/accountant corrections (ADR-0009), oldest first. Latest active one per target wins:
+   * by `createdAt`, and by position in this list when timestamps tie.
+   */
   overrides?: readonly Override[];
 }
 

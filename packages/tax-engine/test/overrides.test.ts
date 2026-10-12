@@ -177,6 +177,14 @@ describe('override history', () => {
     ]);
   });
 
+  it('breaks a timestamp tie by input order, not by id', () => {
+    const same = '2026-01-01T00:00:00Z';
+    const first = { ...basis('1000', same), id: 'zzz' };
+    const second = { ...basis('2000', same), id: 'aaa' };
+    const r = run({ events: [deposit, sellEth], overrides: [first, second] });
+    expect(s(r.disposals[0]!.costBasis)).toBe('2000');
+  });
+
   it('revoking the latest override falls back to the one before it', () => {
     const older = basis('1000', '2026-01-01T00:00:00Z');
     const newer = basis('2000', '2026-02-01T00:00:00Z');

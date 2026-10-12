@@ -27,12 +27,14 @@ See [ADR-0002](./docs/adr/0002-monorepo-structure.md) and [ADR-0016](./docs/adr/
 ```
 apps/
   web/          Next.js app (currently a demo page that runs the engine on sample data)
+  api/          HTTP API (Hono, OpenAPI 3.1): imports, events, overrides, calculations
   mobile/       reserved for the Expo iOS/Android app
 packages/
   domain/       shared types: ledger events, Decimal, time zones
   rule-packs/   jurisdiction rules as cited data: us, jp
   importers/    CSV importers (Coinbase, Kraken, bitFlyer, Coincheck, canonical) + transfer matching
   tax-engine/   pure, deterministic calculation engine + golden and property tests
+  db/           Postgres schema, SQL migrations, row-level security, data access
   config/       shared tsconfig
 docs/           research · spec · adr
 ```
@@ -48,6 +50,27 @@ pnpm lint        # includes platform-neutral/determinism guardrails for shared p
 pnpm typecheck
 pnpm build
 pnpm --filter @svdt/web dev   # http://localhost:3000
+```
+
+### API
+
+Without `DATABASE_URL`, the API uses an embedded Postgres (PGlite) in `apps/api/.data/`, so no
+database server is needed locally. Tests use an in-memory one.
+
+```sh
+pnpm --filter @svdt/api create-key -- --name local   # prints an API key once
+pnpm --filter @svdt/api dev                          # http://localhost:8787/v1/openapi.json
+```
+
+With `DATABASE_URL=postgres://…` (e.g. Neon from the Vercel Marketplace), run
+`pnpm --filter @svdt/api migrate` first. Then, for example:
+
+```sh
+curl -X POST localhost:8787/v1/users -H "authorization: Bearer $KEY" -H 'content-type: application/json' -d '{}'
+curl -X POST "localhost:8787/v1/users/$USER/imports?account=coinbase" -H "authorization: Bearer $KEY" \
+  -H 'content-type: text/csv' --data-binary @export.csv
+curl -X POST localhost:8787/v1/users/$USER/calculations -H "authorization: Bearer $KEY" \
+  -H 'content-type: application/json' -d '{"jurisdiction":"us","taxYear":2025}'
 ```
 
 ## Disclaimer

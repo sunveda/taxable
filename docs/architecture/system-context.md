@@ -83,7 +83,7 @@ flowchart TB
   end
 
   subgraph backend["Backend"]
-    api["apps/api<br/>App API (session auth)<br/>Partner API /v1 (API keys)"]:::planned
+    api["apps/api<br/>Partner API /v1 (API keys) ✅<br/>App API (session auth) ⏳"]:::partial
     worker["apps/worker<br/>import · sync · calculate · reports"]:::planned
     queue[["Postgres-backed job queue"]]:::planned
   end
@@ -96,8 +96,8 @@ flowchart TB
   end
 
   subgraph data["Data"]
-    pg[("PostgreSQL<br/>tenants, users, accounts,<br/>normalized events, overrides,<br/>derived results (RLS)")]:::planned
-    blob[("Object storage<br/>raw imports, report files")]:::planned
+    pg[("PostgreSQL (packages/db)<br/>tenants, users, accounts,<br/>raw files, normalized events,<br/>overrides (RLS)")]:::partial
+    blob[("Object storage<br/>raw imports (in Postgres for now),<br/>report files")]:::planned
     kms["KMS<br/>exchange API secrets,<br/>PII field keys"]:::planned
   end
 

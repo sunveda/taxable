@@ -29,7 +29,7 @@ export interface ResolvedOverrides {
  * Applies the override layer (ADR-0009) to the normalized events.
  *
  * Overrides are append-only. For each target (event + what it changes) the latest active
- * override wins; earlier ones are `superseded`, and a `revoke` deactivates the override it
+ * override wins (by `createdAt`, then input order); earlier ones are `superseded`, and a `revoke` deactivates the override it
  * names. Overrides that can't apply never take a slot, so a mistyped correction can't
  * displace a valid earlier one. Pure: the same events and overrides give the same result.
  */
@@ -39,10 +39,10 @@ export function resolveOverrides(
   reportingCurrency: CurrencyCode,
 ): ResolvedOverrides {
   const byId = new Map<EventId, LedgerEvent>(events.map((e) => [e.id, e]));
+  // Stable sort: overrides with the same timestamp keep their input order, which callers
+  // set to insertion order (timestamps can tie; ids carry no order).
   const ordered = [...overrides].sort(
-    (a, b) =>
-      parseInstant(a.createdAt) - parseInstant(b.createdAt) ||
-      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    (a, b) => parseInstant(a.createdAt) - parseInstant(b.createdAt),
   );
   const status = new Map<string, OverrideOutcome>();
   const set = (o: Override, s: OverrideOutcome['status'], reason?: string): void => {

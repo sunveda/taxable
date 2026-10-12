@@ -40,7 +40,7 @@ Legend: ✅ done · 🟡 partial · ⏳ not started. "Open" is the market score 
 |---|---|---|---|
 | D1 | ~~`missing_price` impact hard-coded to 0, contradicting "fix queue ordered by impact"~~ **Fixed 2026-10-12:** impact is estimated from the nearest quote (ranking only); with no quote, `impactKnown: false`, ranked between known non-zero and known-zero issues | `packages/tax-engine/src/effects.ts`, `issues.ts` | Regression tests in `packages/tax-engine/test/fix-queue.test.ts` |
 | D2 | ~~`Issue.suggestedResolution` is in the spec but not the type~~ **Fixed 2026-10-12:** suggested resolutions for missing prices and unmatched withdrawals, plus the override layer (engine 0.2.0) | tax-engine-spec §8, §8.1 | Tests in `packages/tax-engine/test/overrides.test.ts` |
-| D3 | The web demo computes inside a Next.js server component, but ADR-0011 says the web app is an API client | `apps/web/app/page.tsx` vs ADR-0011 | Acceptable for a demo. Must move behind `apps/api` before any real user data. |
+| D3 | The web demo computes inside a Next.js server component, but ADR-0011 says the web app is an API client | `apps/web/app/page.tsx` vs ADR-0011 | **In progress 2026-10-12:** `apps/api` + `packages/db` exist (imports, events, overrides, calculations, deletion; RLS). The demo still computes locally until session auth exists. |
 | D4 | Competitive landscape lacks Japanese competitors | `competitive-landscape.md` | Added in this review (§2 of that doc). |
 | D5 | Gap analysis still scores G3 as wide open | `gap-analysis.md` | Revised there, with a pointer to this review. |
 | D6 | Product spec MVP lists exchange API import, wallet address import, spam detection, open ledger export, 1099-DA reconciliation, all ⏳ | product-spec §5 | Not wrong (it's the MVP plan), but the implementation status lives only in tax-engine-spec §13 and data-ingestion-spec §7. Use one status table. |
@@ -53,7 +53,7 @@ US tax season starts in January 2027. Japan's filing season is mid-February to m
 
 1. **Unblock data:** get anonymized real exports (Coinbase, Kraken, bitFlyer, Coincheck) and mark the importers verified. Without this, nothing reaches users.
 2. ~~**Fix queue quality (G2, D1, D2):** missing-price impact, suggested resolutions, override layer.~~ Done in the engine 2026-10-12; overrides still need storage (item 3).
-3. **`apps/api` + persistence (D3, ADR-0009/0010/0011):** needed for any real user, for B2B, and for mobile.
+3. **`apps/api` + persistence (D3, ADR-0009/0010/0011):** first slice done 2026-10-12 (partner API with keys, Postgres + RLS). Next: session auth for our own apps, object storage for raw files, hosted database.
 4. **1099-DA reconciliation (G3)**, built deep: line-level matching, 8949 boxes and codes, basis supply. It's parity, but parity we must have by January.
 5. **Explain API + UI (G1, D8):** the drill-down that shows rules and citations, in English and Japanese.
 6. **Japan 2028 design (G9):** venue tagging in importers now, so 2026–2027 data is already split when the separate-taxation pack lands.

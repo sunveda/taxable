@@ -179,7 +179,7 @@ type Issue = {
 | `classify_withdrawal { as: spent, proceeds? }` | `external_withdrawal` | A disposal (`kind: 'spend'`) at `proceeds` or market value; `missing_price` if neither. |
 | `revoke { overrideId }` | same event as the target | Withdraws an earlier override. |
 
-- **Latest active override wins** per target (event + action type, + asset for prices), ordered by `createdAt` then id; earlier ones are `superseded`.
+- **Latest active override wins** per target (event + action type, + asset for prices), ordered by `createdAt`; when timestamps tie, by position in the input list (the API passes insertion order). Earlier ones are `superseded`.
 - An override that doesn't fit its event (wrong kind, negative amount, acquisition after receipt, …) is ignored, never takes the slot from a valid earlier one, and raises `invalid_override` (zero impact; the original issue still shows its own).
 - An override whose event is gone (e.g. after re-import) raises `orphaned_override` with unknown impact; it is never silently dropped.
 - `CalculationResult.overrides` reports every override's status: `applied`, `superseded`, `revoked`, `event_not_found` or `not_applicable` (with `reason`).
