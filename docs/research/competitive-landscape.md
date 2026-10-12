@@ -41,6 +41,18 @@ Notable consolidation and exits:
 | **KoinX** | India | ~INR 115 / tax year | Schedule VDA, 1% TDS (194S) reconciliation, Indian exchange integrations, partnership with CoinDCX | India-only |
 | **Taxbit** | B2B only | Enterprise | 1099-DA, DAC8/CARF in 65+ jurisdictions, public sector | No consumer product; enterprise sales cycle |
 
+### Japan (added 2026-10-12)
+
+| Product | Entry price (reported) | Notes |
+|---|---|---|
+| **Cryptact (クリプタクト)** | from ¥6,000/yr; 50 tx free | Broad domestic and overseas exchange coverage; supports the JCBA/industry-standard formats |
+| **Gtax** | free up to 100 tx/yr; ¥5,500/yr for 300 tx; ¥55,000/yr for 500k tx incl. DeFi/NFT | 70+ exchanges (Nov 2025); also produces accounting journal entries |
+| **CryptoLinC (クリプトリンク)** | ¥3,960/yr (individual) | Patent-backed calculation; overseas exchange imports |
+
+All three price by transaction count, in local currency, at roughly ¥4–6k/yr entry. Their
+support for total vs moving average, and their readiness for 2028 separate taxation, were
+not confirmed in this pass.
+
 ## 3. Pricing model observations
 
 - Almost everyone prices **by transaction count**: 100 → 1k → 3k → 10k → unlimited.

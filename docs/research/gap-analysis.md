@@ -3,6 +3,10 @@
 _Research date: 2026-10-12. Builds on [competitive-landscape.md](./competitive-landscape.md)
 and [regulatory-landscape.md](./regulatory-landscape.md)._
 
+> **Reviewed 2026-10-12:** see [gap-review-2026-10.md](./gap-review-2026-10.md) for current
+> market status and our implementation status per gap. G3 has narrowed: incumbents now ship
+> 1099-DA reconciliation.
+
 ## The core problem nobody has solved
 
 Every B2C tool produces **a number the user can't verify**. Reviews of every major
@@ -26,9 +30,9 @@ Scale 1–5.
 
 | # | Gap | Pain | Open | Fit | Notes |
 |---|---|---|---|---|---|
-| G1 | **Explainability**: "why is my gain $X?" | 5 | 5 | 5 | No incumbent shows a lot-level provenance graph from raw import → lot → disposal → form line. |
+| G1 | **Explainability**: "why is my gain $X?" | 5 | 4 _(was 5)_ | 5 | No incumbent shows a lot-level provenance graph from raw import → lot → disposal → form line. |
 | G2 | **Fix-what-matters**: issues ranked by tax impact | 5 | 4 | 5 | Tools list warnings flatly. Few rank by dollar impact or offer a confident default. |
-| G3 | **1099-DA reconciliation** | 5 (US, 2026–2028) | 4 | 5 | Brand new pain. Noncovered transfers mean blank or wrong basis on broker forms. Users need line-by-line matching and 8949 adjustment codes. |
+| G3 | **1099-DA reconciliation** | 5 (US, 2026–2028) | 2 _(was 4; see review)_ | 5 | Brand new pain. Noncovered transfers mean blank or wrong basis on broker forms. Users need line-by-line matching and 8949 adjustment codes. |
 | G4 | **Basis portability between platforms** ("Basis Passport") | 4 | 5 | 5 | Exchanges can't see the basis of transferred-in assets. A user-consented, signed basis statement lets the receiving exchange report basis voluntarily. Nobody offers this as a network. |
 | G5 | **Fair pricing**: not per-transaction | 4 | 4 | 3 | Tx-count tiers punish DeFi users and charge for spam. Price per tax year by complexity class, with spam and dust excluded. |
 | G6 | **Year-round, pre-trade tax impact** | 3 | 4 | 5 | Tools are used once a year. "If I sell now, what do I owe?" belongs inside the exchange's sell flow, which is a B2B embed opportunity. |

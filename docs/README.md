@@ -6,6 +6,7 @@ Docs come first: research → spec → ADRs → code.
 - [Competitive landscape](./research/competitive-landscape.md): who does what, pricing, strengths and weaknesses
 - [Regulatory landscape](./research/regulatory-landscape.md): 1099-DA, per-wallet basis, DAC8, CARF, reference jurisdictions
 - [Gap analysis](./research/gap-analysis.md): ranked gaps, positioning, strategy, risks
+- [Gap review — Oct 2026](./research/gap-review-2026-10.md): market and implementation status per gap, doc/code inconsistencies, next priorities
 - [Sources](./research/sources.md)
 
 ## Spec — what
