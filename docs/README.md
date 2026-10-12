@@ -17,5 +17,11 @@ Docs come first: research → spec → ADRs → code.
 - [B2B platform spec](./spec/b2b-platform-spec.md): Tax API, Embedded Tax Center, broker reporting, Basis Passport
 - [Security & privacy spec](./spec/security-privacy-spec.md)
 
+## Architecture — diagrams
+- [Overview and legend](./architecture/README.md)
+- [System context & containers](./architecture/system-context.md): users and external systems, today vs target containers, deployment
+- [Components](./architecture/components.md): package dependencies, engine internals, pools, rule packs, importers
+- [Flows](./architecture/flows.md): import → match → calculate, year loop, disposals, valuation, fix queue, transfer matching, and planned flows (ledger, consumer journey, Tax API, Basis Passport, 1099-DA)
+
 ## ADRs — how and why this way
 - [ADR index](./adr/README.md)

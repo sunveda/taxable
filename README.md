@@ -17,7 +17,8 @@ Launch jurisdictions: **United States** and **Japan**
 1. [Gap analysis](./docs/research/gap-analysis.md): why this product, and where incumbents fall short
 2. [Product spec](./docs/spec/product-spec.md): what we're building, and in which phase
 3. [Tax engine spec](./docs/spec/tax-engine-spec.md): how the numbers are computed; §13 shows what's implemented
-4. [ADR index](./docs/adr/README.md): key technical decisions
+4. [Architecture diagrams](./docs/architecture/README.md): context, components, and flows
+5. [ADR index](./docs/adr/README.md): key technical decisions
 
 ## Repository layout
 
