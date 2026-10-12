@@ -1,6 +1,6 @@
 # Tax Engine Spec
 
-_Status: Draft v0.1 · Last updated: 2026-10-12_
+_Status: Draft v0.2 · Last updated: 2026-10-12 · Implementation: `packages/tax-engine` v0.1.0 (see §13)_
 
 The tax engine is the product. It is a **pure, deterministic library**
 ([ADR-0006](../adr/0006-tax-engine-pure-library.md)). It turns a normalized ledger plus a
@@ -23,7 +23,21 @@ Raw imports ──► Normalize ──► Match transfers ──► Classify ─
 ## 2. Canonical event model
 
 Every source (exchange API, CSV, chain indexer, 1099-DA) is normalized into **ledger
-events**:
+events**.
+
+**Two layers.**
+- **Importer output (target design, below).** Importers emit raw multi-leg events with classification hints. The classifier (§3) resolves each one into one of the typed events the engine consumes.
+- **Engine input (implemented in v0.1, `packages/domain/src/ledger.ts`).** A discriminated union with these kinds:
+  - `trade`: buy, sell or swap, with an optional fee;
+  - `transfer`: between your own accounts, with an optional network fee;
+  - `income`: staking, mining, airdrop, interest, hard fork, other;
+  - `fee`;
+  - `external_deposit`: optional user-supplied basis and acquisition date;
+  - `external_withdrawal`.
+
+  Amounts are decimal strings. Timestamps must carry a UTC offset.
+
+Importer output (target design):
 
 ```ts
 type LedgerEvent = {
@@ -169,3 +183,27 @@ interface. See [ADR-0003](../adr/0003-typescript-across-the-stack.md).
   - basis conservation across transfers;
   - determinism.
 - **Fuzzing of importers** with malformed CSVs.
+
+## 13. Implementation status (v0.1.0)
+
+| Area | Status |
+|---|---|
+| Typed event model, decimal arithmetic, local-date tax years | ✅ `packages/domain` |
+| Rule packs `us` (2009–2026) and `jp` (2014–2027), with citations | ✅ `packages/rule-packs` (all rules `draft`) |
+| Lot methods FIFO / LIFO / HIFO, per-account scope | ✅ |
+| Average methods: moving average and total average (year-ahead average), per-user scope | ✅ |
+| Transfers move lots (with parent→child provenance) under per-account scope; no-op under pooled scope | ✅ |
+| Trade fees (basis / selling costs), crypto fees as disposals, deductible-expense flag | ✅ |
+| Income at fair-market value or zero basis per rule pack | ✅ |
+| Valuation: report-currency side → event value → price quote (≤ 24 h old) → FX-converted value | ✅ |
+| Opening positions, incl. US Rev. Proc. 2024-28 safe-harbor allocation with mismatch check | ✅ |
+| Fix queue: missing price/basis, negative balance, unmatched withdrawal, invalid method, opening-position problems; ordered by impact | ✅ |
+| US summary (short/long buckets, ordinary income, Form 8949 lines) | ✅ (checkbox G–L assignment awaits 1099-DA reconciliation) |
+| JP summary (雑所得: disposals + income − expenses; loss not offsettable) | ✅ |
+| Golden scenarios + property tests (conservation, determinism) | ✅ `packages/tax-engine/test` |
+| Classifier, transfer matching, protocol registry | ⏳ next: depends on importers |
+| 1099-DA reconciliation | ⏳ |
+| Specific identification (user-chosen lots) | ⏳ |
+| Japan separate taxation (2028+) | ⏳ (pack refuses those years) |
+| Recompute caching, report hashing | ⏳ |
+

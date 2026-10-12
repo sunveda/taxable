@@ -1,0 +1,550 @@
+import {
+  addYears,
+  compareLocalDates,
+  localDate,
+  parseInstant,
+  allocateProportionally,
+  ZERO,
+  type AccountId,
+  type AssetId,
+  type Decimal,
+  type EventId,
+  type Timestamp,
+} from '@svdt/domain';
+import type { CostBasisMethod, RuleId, YearRules } from '@svdt/rule-packs';
+import {
+  effectsOfEvent,
+  effectsOfOpeningPosition,
+  type Effect,
+  type EffectContext,
+} from './effects';
+import { sortIssues } from './issues';
+import { createPool, TotalAveragePool, type Pool } from './pools';
+import { summarize } from './summary';
+import type {
+  CalculationInput,
+  CalculationResult,
+  ConsumedPart,
+  Disposal,
+  ExpenseRecord,
+  Holding,
+  IncomeRecord,
+  Issue,
+  Lot,
+} from './types';
+import { Valuer } from './valuation';
+
+export const ENGINE_VERSION = '0.1.0';
+
+/** One thing that happens at a point in time: a ledger event or a declared opening position. */
+interface Item {
+  ms: number;
+  rank: number; // opening positions apply before events at the same instant
+  id: string;
+  eventId: EventId | null;
+  timestamp: Timestamp;
+  year: number;
+  effects: Effect[];
+}
+
+/**
+ * Computes a tax year. Pure and deterministic (ADR-0006): no I/O, no clock, no randomness;
+ * the same input always yields the same output.
+ */
+export function calculate(input: CalculationInput): CalculationResult {
+  const pack = input.rulePack;
+  const timeZone = pack.timeZoneFromUser && input.timeZone ? input.timeZone : pack.defaultTimeZone;
+  const targetRules = pack.yearRules(input.taxYear);
+  const scope = targetRules.basisScope;
+  const valuer = new Valuer(pack.reportingCurrency, input.prices ?? []);
+  const yearOf = (ts: Timestamp): number => localDate(ts, timeZone).year;
+
+  const issues: Issue[] = [];
+  const issueIds = new Set<string>();
+  const addIssue = (issue: Omit<Issue, 'id'>, key: string): void => {
+    let id = `${issue.kind}:${key}`;
+    for (let n = 2; issueIds.has(id); n++) id = `${issue.kind}:${key}:${n}`;
+    issueIds.add(id);
+    issues.push({ id, ...issue });
+  };
+
+  // --- Cost-basis method per asset ------------------------------------------------------
+  const methods: Record<AssetId, CostBasisMethod> = {};
+  const methodFor = (asset: AssetId): CostBasisMethod => {
+    const existing = methods[asset];
+    if (existing) return existing;
+    const requested =
+      input.methods?.byAsset?.[asset] ?? input.methods?.default ?? targetRules.costBasis.default;
+    let method = requested;
+    const allowed = targetRules.costBasis.allowed.includes(requested);
+    const needsPooling = requested === 'TOTAL_AVERAGE' && scope !== 'per_user';
+    if (!allowed || needsPooling) {
+      method = targetRules.costBasis.default;
+      addIssue(
+        {
+          kind: 'method_not_allowed',
+          eventIds: [],
+          asset,
+          taxYear: input.taxYear,
+          impact: { min: ZERO, max: ZERO },
+          message: `${requested} is not available for ${asset} under ${pack.name}; using ${method}.`,
+          params: { requested, used: method },
+        },
+        asset,
+      );
+    }
+    methods[asset] = method;
+    return method;
+  };
+
+  // --- Collect and order everything up to the end of the tax year -----------------------
+  const rulesCache = new Map<number, YearRules>();
+  const rulesFor = (year: number): YearRules => {
+    let r = rulesCache.get(year);
+    if (!r) {
+      r = pack.yearRules(year);
+      if (r.basisScope !== scope) {
+        throw new Error(
+          `${pack.id}: basis scope changes between ${year} and ${input.taxYear}; not supported yet`,
+        );
+      }
+      rulesCache.set(year, r);
+    }
+    return r;
+  };
+  const ctxFor = (year: number): EffectContext => ({
+    rules: rulesFor(year),
+    valuer,
+    reportingCurrency: pack.reportingCurrency,
+  });
+
+  const items: Item[] = [];
+  const firstEventMs = new Map<AssetId, number>();
+  for (const e of input.events) {
+    const year = yearOf(e.timestamp);
+    if (year > input.taxYear) continue;
+    const ms = parseInstant(e.timestamp);
+    items.push({
+      ms,
+      rank: 1,
+      id: e.id,
+      eventId: e.id,
+      timestamp: e.timestamp,
+      year,
+      effects: effectsOfEvent(ctxFor(year), e),
+    });
+  }
+  for (const item of items) {
+    for (const eff of item.effects) {
+      if (eff.type === 'issue') continue;
+      const prev = firstEventMs.get(eff.asset);
+      if (prev === undefined || item.ms < prev) firstEventMs.set(eff.asset, item.ms);
+    }
+  }
+  for (const p of input.openingPositions ?? []) {
+    const year = yearOf(p.asOf);
+    if (year > input.taxYear) continue;
+    const ms = parseInstant(p.asOf);
+    const method = methodFor(p.asset);
+    const replaces =
+      scope === 'per_account' && (method === 'FIFO' || method === 'LIFO' || method === 'HIFO');
+    const id = `opening:${p.accountId}:${p.asset}:${p.asOf}`;
+    const first = firstEventMs.get(p.asset);
+    if (!replaces && first !== undefined && first < ms) {
+      addIssue(
+        {
+          kind: 'opening_position_order',
+          eventIds: [],
+          asset: p.asset,
+          taxYear: year,
+          impact: { min: ZERO, max: ZERO },
+          message: `Opening position for ${p.asset} is dated after earlier activity; with pooled basis it is added as an acquisition, not a replacement.`,
+          params: { asOf: p.asOf },
+        },
+        id,
+      );
+    }
+    const ruleRefs =
+      p.reason === 'us_safe_harbor_2024_28' && pack.rules['us.safe_harbor']
+        ? ['us.safe_harbor']
+        : [];
+    items.push({
+      ms,
+      rank: 0,
+      id,
+      eventId: null,
+      timestamp: p.asOf,
+      year,
+      effects: effectsOfOpeningPosition(p, replaces, ruleRefs),
+    });
+  }
+  items.sort((a, b) => a.ms - b.ms || a.rank - b.rank || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  // --- State ------------------------------------------------------------------------------
+  const pools = new Map<string, Pool>();
+  const physical = new Map<string, Decimal>();
+  const lots: Lot[] = [];
+  const disposals: Disposal[] = [];
+  const income: IncomeRecord[] = [];
+  const expenses: ExpenseRecord[] = [];
+  const holdingKey = (account: AccountId, asset: AssetId): string => `${account}\u0000${asset}`;
+  const poolKey = (account: AccountId, asset: AssetId): string =>
+    scope === 'per_account' ? holdingKey(account, asset) : `*\u0000${asset}`;
+  const poolFor = (account: AccountId, asset: AssetId): Pool => {
+    const key = poolKey(account, asset);
+    let pool = pools.get(key);
+    if (!pool) {
+      pool = createPool(asset, methodFor(asset));
+      pools.set(key, pool);
+    }
+    return pool;
+  };
+  const adjustPhysical = (account: AccountId, asset: AssetId, delta: Decimal): void => {
+    const key = holdingKey(account, asset);
+    physical.set(key, (physical.get(key) ?? ZERO).plus(delta));
+  };
+
+  const termOf = (
+    rules: YearRules,
+    acquiredAt: Timestamp | null,
+    disposedAt: Timestamp,
+  ): 'short' | 'long' | null => {
+    if (!rules.holdingPeriod || !acquiredAt) return null;
+    const acquired = localDate(acquiredAt, timeZone);
+    const disposed = localDate(disposedAt, timeZone);
+    return compareLocalDates(disposed, addYears(acquired, rules.holdingPeriod.longTermAfterYears)) >
+      0
+      ? 'long'
+      : 'short';
+  };
+
+  const shortfallIssue = (
+    item: Item,
+    asset: AssetId,
+    shortfall: Decimal,
+    impactMin: Decimal,
+    what: string,
+  ): void => {
+    addIssue(
+      {
+        kind: 'negative_balance',
+        eventIds: item.eventId ? [item.eventId] : [],
+        asset,
+        taxYear: item.year,
+        impact: { min: impactMin, max: ZERO },
+        message: `${what} ${shortfall.toString()} ${asset} more than the history shows was held; that part is given a cost basis of 0. Import missing history or add an opening balance.`,
+        params: { asset, shortfall: shortfall.toString() },
+      },
+      `${item.id}:${asset}`,
+    );
+  };
+
+  const newLot = (fields: Omit<Lot, 'id'>, id: string): Lot => {
+    const lot: Lot = { id, ...fields };
+    if (lot.quantity.isZero()) return lot;
+    lots.push(lot);
+    return lot;
+  };
+
+  // --- Apply effects ----------------------------------------------------------------------
+  const apply = (item: Item, eff: Effect, seq: number): void => {
+    const rules = rulesFor(item.year);
+    const reportable = item.year === input.taxYear;
+    const baseId = item.eventId ?? item.id;
+    switch (eff.type) {
+      case 'issue': {
+        const { type: _t, ...rest } = eff;
+        addIssue(
+          { ...rest, eventIds: item.eventId ? [item.eventId] : [], taxYear: item.year },
+          `${baseId}:${seq}`,
+        );
+        return;
+      }
+      case 'acquire': {
+        const lot = newLot(
+          {
+            accountId: eff.accountId,
+            asset: eff.asset,
+            quantity: eff.quantity,
+            costBasis: eff.costBasis,
+            acquiredAt: eff.acquiredAt,
+            origin: eff.origin,
+            eventId: item.eventId,
+            parentLotId: null,
+          },
+          `${baseId}#${seq}`,
+        );
+        poolFor(eff.accountId, eff.asset).add(lot);
+        adjustPhysical(eff.accountId, eff.asset, eff.quantity);
+        return;
+      }
+      case 'dispose': {
+        const pool = poolFor(eff.accountId, eff.asset);
+        const { parts, shortfall } = pool.take(eff.quantity);
+        adjustPhysical(eff.accountId, eff.asset, eff.quantity.negated());
+        const all: (ConsumedPart & { shortfall: boolean })[] = parts.map((p) => ({
+          ...p,
+          shortfall: false,
+        }));
+        if (!shortfall.isZero()) {
+          const pooled = pool.method === 'MOVING_AVERAGE' || pool.method === 'TOTAL_AVERAGE';
+          all.push({
+            lotId: null,
+            quantity: shortfall,
+            costBasis: ZERO,
+            acquiredAt: pooled ? null : item.timestamp,
+            shortfall: true,
+          });
+        }
+        const quantities = all.map((p) => p.quantity);
+        const proceeds = allocateProportionally(eff.proceeds, quantities);
+        const costs = allocateProportionally(eff.sellingCosts, quantities);
+        all.forEach((part, i) => {
+          const p = proceeds[i] ?? ZERO;
+          const c = costs[i] ?? ZERO;
+          const term = termOf(rules, part.acquiredAt, item.timestamp);
+          if (part.shortfall) {
+            shortfallIssue(item, eff.asset, part.quantity, p.minus(c).negated(), 'Disposes of');
+          }
+          if (!reportable) return;
+          disposals.push({
+            id: `${baseId}#${seq}.${i}`,
+            eventId: item.eventId ?? item.id,
+            kind: eff.kind,
+            accountId: eff.accountId,
+            asset: eff.asset,
+            quantity: part.quantity,
+            disposedAt: item.timestamp,
+            acquiredAt: part.acquiredAt,
+            taxYear: item.year,
+            proceeds: p,
+            sellingCosts: c,
+            costBasis: part.costBasis,
+            gain: p.minus(c).minus(part.costBasis),
+            term,
+            lotId: part.lotId,
+            basisShortfall: part.shortfall,
+            ruleRefs: dedupe([
+              ...eff.ruleRefs,
+              rules.costBasis.rule,
+              rules.basisScopeRule,
+              ...(term && rules.holdingPeriod ? [rules.holdingPeriod.rule] : []),
+            ]),
+          });
+        });
+        return;
+      }
+      case 'move': {
+        adjustPhysical(eff.fromAccountId, eff.asset, eff.quantity.negated());
+        adjustPhysical(eff.toAccountId, eff.asset, eff.quantity);
+        if (scope === 'per_user') return; // same pool: basis is unaffected
+        const { parts, shortfall } = poolFor(eff.fromAccountId, eff.asset).take(eff.quantity);
+        const dest = poolFor(eff.toAccountId, eff.asset);
+        parts.forEach((part, i) => {
+          const lot = newLot(
+            {
+              accountId: eff.toAccountId,
+              asset: eff.asset,
+              quantity: part.quantity,
+              costBasis: part.costBasis,
+              acquiredAt: part.acquiredAt ?? item.timestamp,
+              origin: 'transfer',
+              eventId: item.eventId,
+              parentLotId: part.lotId,
+            },
+            part.lotId ? `${part.lotId}>${baseId}` : `${baseId}#${seq}.${i}`,
+          );
+          dest.add(lot);
+        });
+        if (!shortfall.isZero()) {
+          const market = valuer.value(
+            { asset: eff.asset, quantity: shortfall.toString() },
+            item.timestamp,
+          );
+          shortfallIssue(
+            item,
+            eff.asset,
+            shortfall,
+            market ? market.value.negated() : ZERO,
+            'Transfers',
+          );
+          dest.add(
+            newLot(
+              {
+                accountId: eff.toAccountId,
+                asset: eff.asset,
+                quantity: shortfall,
+                costBasis: ZERO,
+                acquiredAt: item.timestamp,
+                origin: 'shortfall',
+                eventId: item.eventId,
+                parentLotId: null,
+              },
+              `${baseId}#${seq}.shortfall`,
+            ),
+          );
+        }
+        return;
+      }
+      case 'remove': {
+        const { parts, shortfall } = poolFor(eff.accountId, eff.asset).take(eff.quantity);
+        adjustPhysical(eff.accountId, eff.asset, eff.quantity.negated());
+        const removedBasis = parts.reduce((acc, p) => acc.plus(p.costBasis), ZERO);
+        if (!shortfall.isZero()) shortfallIssue(item, eff.asset, shortfall, ZERO, 'Sends');
+        const potentialGain = eff.marketValue ? eff.marketValue.minus(removedBasis) : ZERO;
+        addIssue(
+          {
+            kind: 'unmatched_withdrawal',
+            eventIds: item.eventId ? [item.eventId] : [],
+            asset: eff.asset,
+            taxYear: item.year,
+            impact: { min: ZERO, max: potentialGain.isPositive() ? potentialGain : ZERO },
+            message: `${eff.quantity.toString()} ${eff.asset} left to a wallet that isn't connected. Treated as a move to your own wallet (not taxable). If it was a payment or sale, it is taxable.`,
+            params: { asset: eff.asset, quantity: eff.quantity.toString() },
+          },
+          `${baseId}:${seq}`,
+        );
+        return;
+      }
+      case 'reset': {
+        const key = holdingKey(eff.accountId, eff.asset);
+        const held = physical.get(key) ?? ZERO;
+        const declared = eff.lots.reduce((acc, l) => acc.plus(l.quantity), ZERO);
+        if (!held.equals(declared)) {
+          addIssue(
+            {
+              kind: 'opening_position_mismatch',
+              eventIds: [],
+              asset: eff.asset,
+              taxYear: item.year,
+              impact: { min: ZERO, max: ZERO },
+              message: `Declared lots for ${eff.asset} in ${eff.accountId} total ${declared.toString()}, but the history shows ${held.toString()} held at that time.`,
+              params: {
+                declared: declared.toString(),
+                held: held.toString(),
+                accountId: eff.accountId,
+              },
+            },
+            item.id,
+          );
+        }
+        const pool = poolFor(eff.accountId, eff.asset);
+        pool.reset();
+        eff.lots.forEach((l, i) => {
+          pool.add(
+            newLot(
+              {
+                accountId: eff.accountId,
+                asset: eff.asset,
+                quantity: l.quantity,
+                costBasis: l.costBasis,
+                acquiredAt: l.acquiredAt,
+                origin: 'opening_position',
+                eventId: null,
+                parentLotId: null,
+              },
+              `${item.id}#${i}`,
+            ),
+          );
+        });
+        return;
+      }
+      case 'income': {
+        if (!reportable) return;
+        income.push({
+          id: `${baseId}#${seq}`,
+          eventId: item.eventId ?? item.id,
+          accountId: eff.accountId,
+          asset: eff.asset,
+          incomeType: eff.incomeType,
+          quantity: eff.quantity,
+          receivedAt: item.timestamp,
+          taxYear: item.year,
+          value: eff.value,
+          taxable: eff.taxable,
+          ruleRefs: eff.ruleRefs,
+        });
+        return;
+      }
+      case 'expense': {
+        if (!reportable) return;
+        expenses.push({
+          id: `${baseId}#${seq}`,
+          eventId: item.eventId ?? item.id,
+          accountId: eff.accountId,
+          asset: eff.asset,
+          quantity: eff.quantity,
+          paidAt: item.timestamp,
+          taxYear: item.year,
+          value: eff.value,
+          ruleRefs: eff.ruleRefs,
+        });
+        return;
+      }
+    }
+  };
+
+  // --- Run year by year (total average needs each year's acquisitions up front) ----------
+  const firstYear = items.reduce((min, i) => Math.min(min, i.year), input.taxYear);
+  for (let year = firstYear; year <= input.taxYear; year++) {
+    const yearItems = items.filter((i) => i.year === year);
+    const announced = new Map<string, { quantity: Decimal; cost: Decimal }>();
+    for (const item of yearItems) {
+      for (const eff of item.effects) {
+        if (eff.type !== 'acquire' || methodFor(eff.asset) !== 'TOTAL_AVERAGE') continue;
+        poolFor(eff.accountId, eff.asset);
+        const key = poolKey(eff.accountId, eff.asset);
+        const a = announced.get(key) ?? { quantity: ZERO, cost: ZERO };
+        announced.set(key, {
+          quantity: a.quantity.plus(eff.quantity),
+          cost: a.cost.plus(eff.costBasis),
+        });
+      }
+    }
+    for (const [key, pool] of pools) {
+      if (pool instanceof TotalAveragePool) {
+        const a = announced.get(key) ?? { quantity: ZERO, cost: ZERO };
+        pool.beginYear(a.quantity, a.cost);
+      }
+    }
+    for (const item of yearItems) item.effects.forEach((eff, seq) => apply(item, eff, seq));
+    for (const pool of pools.values()) {
+      if (pool instanceof TotalAveragePool) pool.endYear();
+    }
+  }
+
+  // --- Output -----------------------------------------------------------------------------
+  const holdings: Holding[] = [];
+  for (const [key, pool] of pools) {
+    const quantity = pool.quantity();
+    const costBasis = pool.costBasis();
+    if (quantity.isZero() && costBasis.isZero()) continue;
+    const accountId = scope === 'per_account' ? (key.split('\u0000')[0] ?? null) : null;
+    holdings.push({ accountId, asset: pool.asset, method: pool.method, quantity, costBasis });
+  }
+  holdings.sort((a, b) => cmp(a.asset, b.asset) || cmp(a.accountId ?? '', b.accountId ?? ''));
+
+  return {
+    engineVersion: ENGINE_VERSION,
+    rulePack: { id: pack.id, version: pack.version, status: pack.status },
+    taxYear: input.taxYear,
+    reportingCurrency: pack.reportingCurrency,
+    timeZone,
+    methods,
+    disposals,
+    income,
+    expenses,
+    lots,
+    holdings,
+    issues: sortIssues(issues),
+    summary: summarize(pack, { disposals, income, expenses }, timeZone),
+  };
+}
+
+function cmp(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function dedupe(ids: RuleId[]): RuleId[] {
+  return [...new Set(ids)];
+}

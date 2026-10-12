@@ -56,6 +56,14 @@ independent verification.
 - [What CARF and DAC8 are — Tres Finance](https://tres.finance/what-carf-and-dac8-are-and-who-has-to-file/)
 - [CARF & DAC8 — Blockpit](https://www.blockpit.io/tax-guides/tax-authorities-will-get-your-crypto-data) _(vendor)_
 
+## Japan
+- [令和8年度税制改正大綱（概要版）— EY Japan](https://www.ey.com/ja_jp/technical/ey-japan-tax-library/tax-alerts/2025/tax-alerts-12-23)
+- [令和8年度税制改正大綱②：暗号資産取引の分離課税 — 長島・大野・常松](https://www.nagashima.com/publications/publication20251225-2/)
+- [仮想通貨の分離課税、令和8年度税制改正大綱 — Cryptact](https://www.cryptact.com/blog/crypto-tax-rivision-2026-points) _(vendor)_
+- [税制改正2026と暗号資産｜申告分離課税はいつから？— FAS Calm](https://www.fas-calm.co.jp/blog/2026/09/09/crypto-asset-tax-reform-2026-separation-taxation/)
+- [暗号資産の税金が分離課税20%へ — izujun-tax](https://izujun-tax.com/crypto-separate-taxation-2026/)
+- [暗号資産の評価方法の届出 — 税務通信](https://www.zeiken.co.jp/zeikenpress/?p=13502)
+
 ## India
 - [1% TDS on crypto in India — KoinX](https://koinx.com/tax-guides/impact-of-tds-on-crypto-in-india) _(vendor)_
 
@@ -65,4 +73,5 @@ independent verification.
 - OECD: Crypto-Asset Reporting Framework and XML schema
 - HMRC: Cryptoassets Manual (CRYPTO22200 onward, pooling)
 - Germany: §23 EStG; BMF letter on crypto-assets (2022, updated 2025)
+- Japan: NTA 暗号資産FAQ; 所得税法 §35, §48の2, §69; 所得税法施行令 §119の2–119の5; 令和8年法律第12号
 - India: Income-tax Act §2(47A), §115BBH, §194S; ITR Schedule VDA

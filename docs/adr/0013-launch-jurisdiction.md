@@ -1,6 +1,6 @@
 # ADR-0013: Launch jurisdiction — United States first
 
-- **Status:** Accepted (confirmed by project owner, 2026-10-12)
+- **Status:** Accepted (confirmed by project owner, 2026-10-12); amended by [ADR-0015](./0015-japan-second-jurisdiction.md) (Japan launches alongside)
 - **Date:** 2026-10-12
 
 ## Context

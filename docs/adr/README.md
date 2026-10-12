@@ -18,3 +18,5 @@ Format and process: [ADR-0001](./0001-record-architecture-decisions.md). Templat
 | [0012](./0012-explainability-and-provenance.md) | Every number has provenance | Accepted |
 | [0013](./0013-launch-jurisdiction.md) | Launch jurisdiction: United States first | Accepted |
 | [0014](./0014-read-only-access-no-custody.md) | Read-only data access; no custody | Accepted |
+| [0015](./0015-japan-second-jurisdiction.md) | Japan as the second launch jurisdiction | Accepted |
+| [0016](./0016-tooling-baseline.md) | Tooling baseline for the monorepo | Accepted |

@@ -45,6 +45,32 @@ what the user actually did.
 - **US** reportedly targets 2029 for CARF exchange.
 - **Consequence:** every mid-size exchange serving international users needs CARF/DAC8 data collection and XML reporting. Many will **buy rather than build**.
 
+## Japan
+
+Launch jurisdiction alongside the US; see [ADR-0015](../adr/0015-japan-second-jurisdiction.md).
+
+### Current regime (tax years up to 2027)
+- Gains on crypto assets (暗号資産) and crypto received as income are **miscellaneous income (雑所得)**. They are taxed at progressive rates together with other income: up to 45% national plus 10% resident tax.
+- A net loss inside 雑所得 **can't offset other income categories** and **can't be carried forward**.
+- **Cost basis is per person, per type of crypto asset, across all exchanges and wallets.** Methods:
+  - **total average (総平均法):** the statutory default when no election is filed;
+  - **moving average (移動平均法):** by filing 「所得税の暗号資産の評価方法の届出書」.
+  - The election is made per crypto type, and a chosen method generally can't be changed for 3 years.
+- Crypto-for-crypto exchanges and paying with crypto are disposals.
+- Staking rewards are income at market value on receipt.
+- Hard-fork coins are not income on receipt and have zero basis.
+- Airdrop treatment is less settled.
+- The tax year is the calendar year in Japan Standard Time.
+
+### Separate taxation from 2028 (expected)
+- The FY2026 tax reform (令和8年度税制改正) introduces **separate taxation at 20.315%** (15% income tax + 0.315% reconstruction tax + 5% resident tax) for gains on *specified crypto assets* (特定暗号資産) handled by registered firms. It includes a **3-year loss carryforward**.
+- The amended Income Tax Act was promulgated 2026-03-31. Secondary sources report the FIEA/PSA amendments passed in July 2026.
+- Separate taxation applies from **1 January of the year after** the FIEA amendment takes effect, which is expected to be **2028-01-01** if it takes effect during 2027. The date is set by cabinet order.
+- DEX and overseas-exchange activity is expected to remain under comprehensive taxation. The engine will need to tag venues and split buckets.
+- **Status in this repo:** the `jp` rule pack covers 2014–2027 and refuses 2028+ until the new regime is implemented.
+
+Primary sources to verify (not yet reviewed): NTA 「暗号資産に関する税務上の取扱いについて（FAQ）」; Income Tax Act §35, §48-2; Enforcement Order §119-2–119-5; 令和8年法律第12号.
+
 ## Reference jurisdictions for the rule-pack design
 
 These are chosen to stress-test the engine architecture
@@ -55,6 +81,7 @@ These are chosen to stress-test the engine architecture
 | **US** | Per-wallet lots, short vs long term (>1 year), FIFO/HIFO/spec-ID, 1099-DA reconciliation, wash sale **not** applied to crypto (as of research date; repeatedly proposed) |
 | **UK** | Share pooling: same-day rule, 30-day "bed & breakfast" rule, then the Section 104 pool. No per-lot choice. |
 | **Germany** | Private disposals are tax-free after a **1-year holding period** (§23 EStG); €1,000 annual exemption limit (Freigrenze); staking does not extend the period to 10 years (BMF guidance). Lot age matters more than gain size. |
+| **Japan** | Pooled basis across all accounts; **total/moving average** only (no lots, no holding period); JST tax year; regime switch to separate taxation in 2028 (mid-life rule-pack versioning) |
 | **India** | Flat **30%** + 4% cess on VDA gains (§115BBH); **no loss set-off** and no deductions beyond acquisition cost; **1% TDS** (§194S) on transfers above INR 10,000 that must be credited/reconciled; Schedule VDA in the ITR. |
 
 If one engine can express all four through data-driven rule packs, adding jurisdictions

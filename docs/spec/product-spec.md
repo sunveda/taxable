@@ -68,6 +68,7 @@ Research basis: [gap-analysis.md](../research/gap-analysis.md).
 | Explain-this-number provenance drill-down | ✅ | | |
 | 1099-DA import and reconciliation | ✅ | | |
 | US Form 8949 / Schedule D, TurboTax export | ✅ | | |
+| Japan rule pack (総平均法/移動平均法, 雑所得), 確定申告 figures | ✅ | NTA 計算書 export | 2028 separate taxation |
 | Spam/dust detection (excluded from pricing) | ✅ | | |
 | Open ledger export (JSON/CSV + schema) | ✅ | | |
 | Additional rule packs: UK, DE, IN | | ✅ | more |
@@ -114,7 +115,7 @@ The goal is to remove the main pricing complaint: **per-transaction tiers that c
 
 ## 9. Open questions
 
-1. ~~Launch jurisdiction~~ — decided: **US** ([ADR-0013](../adr/0013-launch-jurisdiction.md)).
+1. ~~Launch jurisdiction~~ — decided: **US and Japan** ([ADR-0013](../adr/0013-launch-jurisdiction.md), [ADR-0015](../adr/0015-japan-second-jurisdiction.md)).
 2. Brand and product name. "svdt-cloud" is the project codename; the repo is `taxable`.
 3. Tax-professional partner for rule-pack review (required before any public launch).
 4. Exchange design partners for B2B beta.
