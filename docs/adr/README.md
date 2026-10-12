@@ -20,3 +20,4 @@ Format and process: [ADR-0001](./0001-record-architecture-decisions.md). Templat
 | [0014](./0014-read-only-access-no-custody.md) | Read-only data access; no custody | Accepted |
 | [0015](./0015-japan-second-jurisdiction.md) | Japan as the second launch jurisdiction | Accepted |
 | [0016](./0016-tooling-baseline.md) | Tooling baseline for the monorepo | Accepted |
+| [0017](./0017-importer-architecture.md) | Importer architecture: CSV-first, structure-driven, verification gate | Accepted |

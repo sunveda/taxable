@@ -11,7 +11,8 @@ Docs come first: research → spec → ADRs → code.
 ## Spec — what
 - [Product spec](./spec/product-spec.md): personas, journeys, phasing, pricing hypothesis, metrics
 - [Tax engine spec](./spec/tax-engine-spec.md): pipeline, event model, lots, fix queue, 1099-DA reconciliation
-- [Data ingestion spec](./spec/data-ingestion-spec.md): importers, on-chain decoding, spam, asset identity
+- [Data ingestion spec](./spec/data-ingestion-spec.md): importers, transfer matching, Japan specifics, MVP sources
+- [Canonical CSV](./spec/canonical-csv.md): our documented import/export format
 - [B2B platform spec](./spec/b2b-platform-spec.md): Tax API, Embedded Tax Center, broker reporting, Basis Passport
 - [Security & privacy spec](./spec/security-privacy-spec.md)
 

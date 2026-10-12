@@ -1,6 +1,6 @@
 # Data Ingestion Spec
 
-_Status: Draft v0.1 · Last updated: 2026-10-12_
+_Status: Draft v0.2 · Last updated: 2026-10-12 · Architecture: [ADR-0017](../adr/0017-importer-architecture.md)_
 
 ## 1. Principles
 
@@ -17,24 +17,47 @@ _Status: Draft v0.1 · Last updated: 2026-10-12_
 |---|---|---|
 | Exchange API | Read-only API key or OAuth | Incremental sync with cursors; rate-limit aware; nightly refresh |
 | Exchange CSV | Upload | Auto-detect exchange and format version by header fingerprint |
-| Generic CSV | Upload + column-mapping UI | Fallback for the long tail; saved mappings are reusable |
+| Generic CSV | Upload of the [svdt canonical CSV](./canonical-csv.md) (later: column-mapping UI) | Fallback for the long tail; saved mappings are reusable |
 | Wallet address | Chain indexer (provider abstraction) | BTC (xpub/address), EVM chains, Solana in MVP |
 | Broker tax forms | 1099-DA CSV/PDF | Stored as the **reported-figures** layer, not as ledger events |
 | B2B push | Tax API batch import | Partner-provided events in the canonical schema |
 
 ## 3. Importer interface
 
+Implemented for CSV in `packages/importers` (v0.1):
+
 ```ts
-interface Importer<Config> {
-  id: string;                  // "coinbase.api.v3", "kraken.csv.2024", "evm.address"
-  detect?(file: RawFile): Confidence;
-  fetch?(config: Config, cursor?: Cursor): AsyncIterable<RawPage>;
-  normalize(raw: RawPage | RawFile): { events: LedgerEvent[]; warnings: ImportWarning[] };
+interface CsvImporter {
+  id: string;                       // "coinbase.transactions.csv.v2"
+  markets: ('us' | 'jp')[];
+  format: { status: 'verified' | 'unverified'; sources: string[]; notes?: string };
+  requiredColumns: string[];        // header fingerprint used for detection
+  parse(table: CsvTable, ctx: { accountId }): { events: LedgerEvent[]; warnings: ImportWarning[]; stats };
 }
+
+importCsv(text, { accountId, importerId? })   // detect + parse
+decodeText(bytes)                             // UTF-8, falling back to Shift_JIS
+matchTransfers(events, { windowHours?, maxFeeRatio? })
 ```
 
-- Importers live in `packages/importers`, one module per source. They are pure normalization;
-  network fetch is separated so it can be mocked.
+- One module per source. Parsing is pure; network fetch (API sync, indexers) will be a separate layer so it can be mocked.
+- API and on-chain importers will emit the same `LedgerEvent`s.
+- **Warnings** carry a line number and a code: `unknown_type`, `unsupported_type`, `invalid_number`, `invalid_timestamp`, `unrecognized_row`, `assumption`. A row is never dropped without one, except intentional skips (fiat deposits, internal moves), which are counted in `stats.skipped`.
+
+### 3.1 Format verification policy
+- `unverified` importers are built from public descriptions and synthetic fixtures. They must not be offered to users as "supported" until tested against anonymized real exports, which are then committed as fixtures.
+- `verified` importers carry real-export fixtures. Any format change found in the wild becomes a new importer version (e.g. `…csv.v3`); old versions stay so older files still import.
+
+### 3.2 Transfer matching
+- Runs after all of a user's sources are imported.
+- A withdrawal from account A matches a deposit into account B when all of these hold:
+  - same asset;
+  - the deposit arrives 0–72 h after the withdrawal;
+  - the deposit is ≤ the withdrawal, with a shortfall of at most 2% (the network fee).
+- Withdrawals are processed in time order, and each takes the closest deposit in time.
+- The pair becomes one `transfer`, with the shortfall as its fee.
+- Deposits with a user-stated basis are never matched.
+- Unmatched rows stay external and appear in the engine's fix queue.
 
 ## 4. On-chain decoding
 
@@ -61,6 +84,25 @@ interface Importer<Config> {
 - Jobs run on a Postgres-backed queue initially. See [ADR-0010](../adr/0010-postgres-primary-store.md).
 
 ## 7. MVP source list
-The launch market is the US ([ADR-0013](../adr/0013-launch-jurisdiction.md)). The exact list is
-finalized in the first importer PR: the top 5–8 US-available CEXs by user share, plus generic CSV, BTC, EVM (Ethereum, Base, Arbitrum,
-Optimism, Polygon, BNB Chain), and Solana.
+
+Launch markets: US and Japan ([ADR-0013](../adr/0013-launch-jurisdiction.md), [ADR-0015](../adr/0015-japan-second-jurisdiction.md)).
+
+| Source | Market | Mechanism | Status |
+|---|---|---|---|
+| svdt canonical CSV | all | CSV | ✅ verified (our own format) |
+| Coinbase | US | CSV (transaction history) | 🟡 implemented, unverified |
+| Kraken | US | CSV (ledgers) | 🟡 implemented, unverified |
+| Coincheck (業界標準フォーマット) | JP | CSV | 🟡 implemented, unverified |
+| bitFlyer | JP | CSV (取引履歴) | 🟡 implemented, unverified |
+| Coincheck 暗号資産報酬履歴 (staking) | JP | CSV | ⏳ format needed |
+| Gemini, Robinhood Crypto, Crypto.com, Binance.US | US | CSV, then API | ⏳ |
+| bitbank, GMO Coin, SBI VC Trade, bitTrade | JP | CSV (several may offer 業界標準フォーマット) | ⏳ |
+| Exchange API sync (Coinbase, Kraken, bitFlyer) | US/JP | Read-only API keys (ADR-0014) | ⏳ |
+| BTC, EVM (Ethereum, Base, Arbitrum, Optimism, Polygon), Solana | all | Address import via indexer | ⏳ |
+
+## 8. Japan-specific handling
+- **Encoding:** files may be Shift_JIS. `decodeText` tries strict UTF-8 first, then Shift_JIS. Hermes lacks Shift_JIS, so mobile uploads are decoded server-side.
+- **Time:** exports use JST without an offset. Importers attach `+09:00`; Japan has no DST.
+- **Labels:** 取引種別 values vary by exchange. Importers decide what happened from structure (増加/減少 columns, signed quantities). Labels are used only to recognise income (ステーキング, 貸暗号資産, エアドロップ, 報酬 …). Anything else crypto-in-only becomes a deposit with unknown basis, for the user to review.
+- **Values:** bitFlyer's 通貨1の対円レート gives a JPY value for received coins, used for income and deposits.
+- **Industry standard format:** Coincheck's 業界標準フォーマット follows the JCBA reference format (2021). Other Japanese exchanges adopting it should be covered by the same importer once verified.

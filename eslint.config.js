@@ -6,6 +6,7 @@ const SHARED = [
   'packages/domain/src/**',
   'packages/rule-packs/src/**',
   'packages/tax-engine/src/**',
+  'packages/importers/src/**',
 ];
 
 export default tseslint.config(

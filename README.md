@@ -30,6 +30,7 @@ apps/
 packages/
   domain/       shared types: ledger events, Decimal, time zones
   rule-packs/   jurisdiction rules as cited data: us, jp
+  importers/    CSV importers (Coinbase, Kraken, bitFlyer, Coincheck, canonical) + transfer matching
   tax-engine/   pure, deterministic calculation engine + golden and property tests
   config/       shared tsconfig
 docs/           research · spec · adr

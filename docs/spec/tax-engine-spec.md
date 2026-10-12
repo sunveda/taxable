@@ -201,7 +201,9 @@ interface. See [ADR-0003](../adr/0003-typescript-across-the-stack.md).
 | US summary (short/long buckets, ordinary income, Form 8949 lines) | ✅ (checkbox G–L assignment awaits 1099-DA reconciliation) |
 | JP summary (雑所得: disposals + income − expenses; loss not offsettable) | ✅ |
 | Golden scenarios + property tests (conservation, determinism) | ✅ `packages/tax-engine/test` |
-| Classifier, transfer matching, protocol registry | ⏳ next: depends on importers |
+| Transfer matching | ✅ `packages/importers` (`matchTransfers`, ADR-0017) |
+| CSV importers: canonical, Coinbase, Kraken, Coincheck (業界標準), bitFlyer | ✅ `packages/importers` (all but canonical `unverified`) |
+| Classifier and protocol registry (on-chain) | ⏳ |
 | 1099-DA reconciliation | ⏳ |
 | Specific identification (user-chosen lots) | ⏳ |
 | Japan separate taxation (2028+) | ⏳ (pack refuses those years) |

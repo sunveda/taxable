@@ -67,6 +67,18 @@ independent verification.
 ## India
 - [1% TDS on crypto in India — KoinX](https://koinx.com/tax-guides/impact-of-tds-on-crypto-in-india) _(vendor)_
 
+## Exchange export formats (importers, ADR-0017)
+- [Coinbase CSV header (community report) — cryptofiscafacile #595](https://gitlab.com/c1560/cryptofiscafacile/-/issues/595)
+- [BittyTax changelog (Coinbase/Kraken type labels)](https://github.com/BittyTax/BittyTax/blob/master/CHANGELOG.md)
+- [Kraken API: Request Export Report](https://docs.kraken.com/api-reference/account-data/request-export-report.md)
+- [Kraken API: Get Ledgers Info](https://docs.kraken.com/api-reference/account-data/get-ledgers-info)
+- [Kraken support: How to interpret Ledger history fields](https://support.kraken.com/articles/360001169383-how-to-interpret-ledger-history-fields) _(not reachable from the build environment)_
+- [BittyTax Kraken fee issue #91 (KFEE rows)](https://github.com/BittyTax/BittyTax/issues/91)
+- [bitFlyer 現物取引データ — CryptoLinC](https://support.cryptolinc.com/hc/ja/articles/8028370543887) _(vendor)_
+- [Coincheck FAQ: 業界標準フォーマットの仕様](https://faq.coincheck.com/answer/6886c199d5225ee0cf695ab1) _(not reachable from the build environment)_
+- [Coincheck 損益計算ガイド — CryptoLinC](https://cryptolinc.com/blog/coincheck-pl-calculation) _(vendor; column list)_
+- [JCBA 暗号資産取引履歴の参考フォーマット (2021-11-12)](https://cryptocurrency-association.org/news/main-info/20211112-001/) _(not reachable from the build environment)_
+
 ## Primary sources to consult before implementing rules (not yet reviewed)
 - IRS: Instructions for Form 1099-DA; Instructions for Form 8949; Treas. Reg. §1.6045-1, §1.1012-1(j); Rev. Proc. 2024-28
 - EUR-Lex: Council Directive (EU) 2023/2226 (DAC8)
