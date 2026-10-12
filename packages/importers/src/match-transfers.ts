@@ -1,6 +1,7 @@
 import {
   dec,
   parseInstant,
+  type Decimal,
   type ExternalDepositEvent,
   type ExternalWithdrawalEvent,
   type LedgerEvent,
@@ -16,8 +17,18 @@ export interface TransferMatch {
 export interface MatchOptions {
   /** How long after the withdrawal the deposit may arrive. Default 72 h. */
   windowHours?: number;
+  /**
+   * How far the deposit's timestamp may precede the withdrawal's. Exchanges stamp at
+   * different moments (sender at completion, receiver at detection). Default 30 min.
+   */
+  clockSkewMinutes?: number;
   /** Largest share of the withdrawal that may be lost to network fees. Default 2%. */
   maxFeeRatio?: string;
+}
+
+interface Timed<E> {
+  e: E;
+  ms: number;
 }
 
 /**
@@ -26,46 +37,60 @@ export interface MatchOptions {
  * The shortfall between sent and received becomes the transfer's network fee.
  *
  * Deterministic and greedy: withdrawals in time order each take the closest eligible
- * deposit. Deposits with a user-stated cost basis are left alone.
+ * deposit (by absolute time gap, then smallest shortfall, then id). Deposits with a
+ * user-stated cost basis are left alone.
+ *
+ * Timestamps are parsed once, and deposits are indexed per asset and sorted by time, so
+ * each withdrawal only scans deposits inside its window.
  */
 export function matchTransfers(
   events: readonly LedgerEvent[],
   options: MatchOptions = {},
 ): { events: LedgerEvent[]; matches: TransferMatch[] } {
   const windowMs = (options.windowHours ?? 72) * 3_600_000;
+  const skewMs = (options.clockSkewMinutes ?? 30) * 60_000;
   const maxFeeRatio = dec(options.maxFeeRatio ?? '0.02');
-  const byTime = (a: LedgerEvent, b: LedgerEvent): number =>
-    parseInstant(a.timestamp) - parseInstant(b.timestamp) ||
-    (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const byTime = <E extends LedgerEvent>(a: Timed<E>, b: Timed<E>): number =>
+    a.ms - b.ms || (a.e.id < b.e.id ? -1 : a.e.id > b.e.id ? 1 : 0);
 
-  const withdrawals = events
-    .filter((e): e is ExternalWithdrawalEvent => e.kind === 'external_withdrawal')
-    .sort(byTime);
-  const deposits = events
-    .filter((e): e is ExternalDepositEvent => e.kind === 'external_deposit' && !e.costBasis)
-    .sort(byTime);
+  const withdrawals: Timed<ExternalWithdrawalEvent>[] = [];
+  const depositsByAsset = new Map<string, Timed<ExternalDepositEvent>[]>();
+  for (const e of events) {
+    if (e.kind === 'external_withdrawal') {
+      withdrawals.push({ e, ms: parseInstant(e.timestamp) });
+    } else if (e.kind === 'external_deposit' && !e.costBasis) {
+      const list = depositsByAsset.get(e.received.asset) ?? [];
+      list.push({ e, ms: parseInstant(e.timestamp) });
+      depositsByAsset.set(e.received.asset, list);
+    }
+  }
+  withdrawals.sort(byTime);
+  for (const list of depositsByAsset.values()) list.sort(byTime);
+
   const used = new Set<string>();
   const replaced = new Map<string, TransferEvent | null>();
   const matches: TransferMatch[] = [];
 
-  for (const w of withdrawals) {
-    const wMs = parseInstant(w.timestamp);
+  for (const { e: w, ms: wMs } of withdrawals) {
+    const deposits = depositsByAsset.get(w.sent.asset);
+    if (!deposits) continue;
     const wQty = dec(w.sent.quantity);
-    let best: { d: ExternalDepositEvent; gap: number; diff: string } | null = null;
-    for (const d of deposits) {
-      if (used.has(d.id) || d.accountId === w.accountId || d.received.asset !== w.sent.asset)
-        continue;
-      const gap = parseInstant(d.timestamp) - wMs;
-      if (gap < 0 || gap > windowMs) continue;
+    let best: { d: ExternalDepositEvent; gap: number; diff: Decimal } | null = null;
+    for (let i = firstAtOrAfter(deposits, wMs - skewMs); i < deposits.length; i++) {
+      const { e: d, ms: dMs } = deposits[i]!;
+      if (dMs > wMs + windowMs) break;
+      if (used.has(d.id) || d.accountId === w.accountId) continue;
       const dQty = dec(d.received.quantity);
       if (dQty.greaterThan(wQty) || wQty.minus(dQty).greaterThan(wQty.times(maxFeeRatio))) continue;
-      const diff = wQty.minus(dQty).toFixed();
-      if (!best || gap < best.gap || (gap === best.gap && dec(diff).lessThan(best.diff)))
+      const gap = Math.abs(dMs - wMs);
+      const diff = wQty.minus(dQty);
+      if (!best || gap < best.gap || (gap === best.gap && diff.lessThan(best.diff))) {
         best = { d, gap, diff };
+      }
     }
     if (!best) continue;
     used.add(best.d.id);
-    const fee = dec(best.diff);
+    const fee = best.diff;
     const transfer: TransferEvent = {
       kind: 'transfer',
       id: `transfer:${w.id}>${best.d.id}`,
@@ -106,4 +131,16 @@ export function matchTransfers(
     }
   }
   return { events: out, matches };
+}
+
+/** Index of the first deposit with `ms >= target` (list sorted by ms). */
+function firstAtOrAfter(list: readonly Timed<ExternalDepositEvent>[], target: number): number {
+  let lo = 0;
+  let hi = list.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (list[mid]!.ms < target) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }

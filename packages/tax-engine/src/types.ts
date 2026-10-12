@@ -47,6 +47,8 @@ export interface Lot {
   origin: LotOrigin;
   eventId: EventId | null;
   parentLotId: string | null;
+  /** Rules that set this lot's basis (e.g. trade-fee capitalisation, income basis, safe harbor). */
+  ruleRefs: RuleId[];
 }
 
 export interface ConsumedPart {

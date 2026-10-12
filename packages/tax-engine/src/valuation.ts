@@ -107,24 +107,47 @@ export class Valuer {
     const list = this.index.get(asset);
     if (!list || list.length === 0) return null;
     const ms = parseInstant(at);
-    let best: IndexedQuote | null = null;
-    for (const q of list) {
-      if (!best || Math.abs(q.ms - ms) < Math.abs(best.ms - ms)) best = q;
-    }
-    return best ? best.quote : null;
+    const i = lowerBound(list, ms); // first quote at or after `at`
+    const after = list[i];
+    const before = i > 0 ? list[i - 1] : undefined;
+    if (!before) return after ? after.quote : null;
+    if (!after) return before.quote;
+    // Earlier wins a tie.
+    return ms - before.ms <= after.ms - ms ? before.quote : after.quote;
   }
 
   /** Latest quote at or before `at`, no older than a day. */
   private quote(asset: AssetId, at: Timestamp): PriceQuote | null {
     const list = this.index.get(asset);
-    if (!list) return null;
+    if (!list || list.length === 0) return null;
     const ms = parseInstant(at);
-    let found: IndexedQuote | null = null;
-    for (const q of list) {
-      if (q.ms > ms) break;
-      found = q;
-    }
+    const i = upperBound(list, ms) - 1; // last quote at or before `at`
+    const found = i >= 0 ? list[i] : undefined;
     if (!found || ms - found.ms > MAX_QUOTE_AGE_MS) return null;
     return found.quote;
   }
+}
+
+/** Index of the first quote with `ms >= target` (list sorted by ms). */
+function lowerBound(list: readonly IndexedQuote[], target: number): number {
+  let lo = 0;
+  let hi = list.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (list[mid]!.ms < target) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** Index of the first quote with `ms > target` (list sorted by ms). */
+function upperBound(list: readonly IndexedQuote[], target: number): number {
+  let lo = 0;
+  let hi = list.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (list[mid]!.ms <= target) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }

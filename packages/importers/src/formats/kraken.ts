@@ -65,6 +65,8 @@ const UNSUPPORTED_TYPES = new Set(['margin', 'rollover', 'settled', 'adjustment'
 interface Row {
   line: number;
   txid: string;
+  /** Asset carried a staking/earn suffix (DOT.S, ETH2.S, USD.HOLD …). */
+  staked: boolean;
   refid: string;
   time: Timestamp;
   type: string;
@@ -117,6 +119,7 @@ export const krakenLedgersCsv: CsvImporter = {
       rows.push({
         line,
         txid: cells['txid'] ?? '',
+        staked: (cells['asset'] ?? '').includes('.'),
         refid: cells['refid'] || cells['txid'] || `line${line}`,
         time,
         type: (cells['type'] ?? '').toLowerCase(),
@@ -127,7 +130,11 @@ export const krakenLedgersCsv: CsvImporter = {
       });
     }
 
-    // 2. Group by refid, keeping file order.
+    // 2. Rows that are not real arrivals or departures.
+    const internal = findStakingMoves(rows);
+    const pendingDuplicates = findPendingDuplicates(rows);
+
+    // 3. Group by refid, keeping file order.
     const groups = new Map<string, Row[]>();
     for (const r of rows) {
       const g = groups.get(r.refid) ?? [];
@@ -188,9 +195,21 @@ export const krakenLedgersCsv: CsvImporter = {
         const rowId = `kraken:${accountId}:${r.txid || `${refid}:${r.line}`}`;
         const amount: AssetAmount = { asset: r.asset, quantity: r.amount.abs().toFixed() };
         const fiatRow = isFiat(r.asset);
-        if (INTERNAL_SUBTYPES.has(r.subtype) || (r.type === 'earn' && r.subtype !== 'reward')) {
+        if (
+          INTERNAL_SUBTYPES.has(r.subtype) ||
+          (r.type === 'earn' && r.subtype !== 'reward') ||
+          internal.has(r) ||
+          pendingDuplicates.has(r)
+        ) {
           skipped++;
           continue;
+        }
+        if ((r.type === 'deposit' || r.type === 'withdrawal') && r.txid === '') {
+          warnings.push({
+            line: r.line,
+            code: 'assumption',
+            message: `Kraken ${r.type} has no txid and no credited row; treated as completed.`,
+          });
         }
         if (UNSUPPORTED_TYPES.has(r.type)) {
           warnings.push({
@@ -306,4 +325,61 @@ function feeEvent(id: string, r: Row, accountId: string, sourceRef: string): Led
     fee: { asset: r.asset, quantity: r.fee.toFixed() },
     sourceRef,
   };
+}
+
+const FUNDING = new Set(['deposit', 'withdrawal']);
+const STAKING_WINDOW_MS = 14 * 24 * 3_600_000;
+
+/**
+ * Kraken lists a funding movement twice: pending (blank txid) and credited (with txid).
+ * The pending row is a duplicate whenever the same refid has a credited row of the same
+ * type and asset.
+ */
+function findPendingDuplicates(rows: readonly Row[]): Set<Row> {
+  const credited = new Set(
+    rows
+      .filter((r) => FUNDING.has(r.type) && r.txid !== '')
+      .map((r) => `${r.refid}|${r.type}|${r.asset}`),
+  );
+  return new Set(
+    rows.filter(
+      (r) =>
+        FUNDING.has(r.type) && r.txid === '' && credited.has(`${r.refid}|${r.type}|${r.asset}`),
+    ),
+  );
+}
+
+/**
+ * Moving coins between spot and staking shows up as a withdrawal of one form of the asset
+ * and a deposit of the other (DOT → DOT.S, or back). Both stay in the same account, so
+ * neither is an arrival or departure. Rows on a staking asset are always internal; the
+ * spot-side row is paired with the closest staking row of the same quantity (≤ 2% apart,
+ * spot side first when staking, staking side first when unstaking, within 14 days).
+ */
+function findStakingMoves(rows: readonly Row[]): Set<Row> {
+  const internal = new Set<Row>();
+  const funding = rows.filter((r) => FUNDING.has(r.type));
+  const ms = new Map(funding.map((r) => [r, Date.parse(r.time)]));
+  for (const s of funding.filter((r) => r.staked)) {
+    internal.add(s);
+    const wantType = s.type === 'deposit' ? 'withdrawal' : 'deposit';
+    let best: Row | null = null;
+    let bestGap = Infinity;
+    for (const c of funding) {
+      if (c.staked || internal.has(c) || c.type !== wantType || c.asset !== s.asset) continue;
+      // Staking: spot withdrawal precedes the staking deposit. Unstaking: the reverse.
+      const gap = s.type === 'deposit' ? ms.get(s)! - ms.get(c)! : ms.get(c)! - ms.get(s)!;
+      if (gap < 0 || gap > STAKING_WINDOW_MS) continue;
+      const a = s.amount.abs();
+      const b = c.amount.abs();
+      const big = a.greaterThan(b) ? a : b;
+      if (big.isZero() || a.minus(b).abs().greaterThan(big.times('0.02'))) continue;
+      if (gap < bestGap) {
+        best = c;
+        bestGap = gap;
+      }
+    }
+    if (best) internal.add(best);
+  }
+  return internal;
 }

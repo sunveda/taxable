@@ -52,9 +52,10 @@ matchTransfers(events, { windowHours?, maxFeeRatio? })
 - Runs after all of a user's sources are imported.
 - A withdrawal from account A matches a deposit into account B when all of these hold:
   - same asset;
-  - the deposit arrives 0–72 h after the withdrawal;
+  - the deposit's timestamp is between 30 min before and 72 h after the withdrawal's (exchanges stamp at different moments, so a deposit can appear slightly "early");
   - the deposit is ≤ the withdrawal, with a shortfall of at most 2% (the network fee).
-- Withdrawals are processed in time order, and each takes the closest deposit in time.
+- Withdrawals are processed in time order, and each takes the deposit closest in time (absolute gap, then smallest shortfall).
+- Timestamps are parsed once; deposits are indexed per asset and sorted, so each withdrawal only scans its own window.
 - The pair becomes one `transfer`, with the shortfall as its fee.
 - Deposits with a user-stated basis are never matched.
 - Unmatched rows stay external and appear in the engine's fix queue.
@@ -99,6 +100,10 @@ Launch markets: US and Japan ([ADR-0013](../adr/0013-launch-jurisdiction.md), [A
 | bitbank, GMO Coin, SBI VC Trade, bitTrade | JP | CSV (several may offer 業界標準フォーマット) | ⏳ |
 | Exchange API sync (Coinbase, Kraken, bitFlyer) | US/JP | Read-only API keys (ADR-0014) | ⏳ |
 | BTC, EVM (Ethereum, Base, Arbitrum, Optimism, Polygon), Solana | all | Address import via indexer | ⏳ |
+
+## 7a. Kraken ledger specifics
+- **Pending + credited rows.** Kraken lists a funding movement twice: pending (blank `txid`) and credited (with `txid`). A blank-`txid` deposit or withdrawal is skipped when the same `refid` has a credited row of the same type and asset. Without a credited twin it is imported, with an `assumption` warning.
+- **Spot ↔ staking.** Rows on staking assets (`DOT.S`, `ETH2.S`, …) are internal. The spot-side withdrawal or deposit is paired with the closest staking row of the same quantity (≤ 2% apart, within 14 days) and skipped too, so staking never strips basis.
 
 ## 8. Japan-specific handling
 - **Encoding:** files may be Shift_JIS. `decodeText` tries strict UTF-8 first, then Shift_JIS. Hermes lacks Shift_JIS, so mobile uploads are decoded server-side.

@@ -102,9 +102,10 @@ export interface EffectContext {
 /**
  * How resolving a missing price would move taxable amounts:
  * `raises`: a value counted as 0 should be positive (sale proceeds, taxable income);
- * `either`: the effect could go either way (fees, basis of non-taxable receipts).
+ * `lowers`: the missing value is cost basis, so supplying it reduces later gains (purchases);
+ * `either`: the effect could go either way (swaps, fees, basis of non-taxable receipts).
  */
-type PriceEffect = 'raises' | 'either';
+type PriceEffect = 'raises' | 'lowers' | 'either';
 
 function missingPrice(
   ctx: EffectContext,
@@ -125,7 +126,10 @@ function missingPrice(
     kind: 'missing_price',
     asset: amount.asset,
     impact: estimate
-      ? { min: effect === 'raises' ? ZERO : estimate.negated(), max: estimate }
+      ? {
+          min: effect === 'raises' ? ZERO : estimate.negated(),
+          max: effect === 'lowers' ? ZERO : estimate,
+        }
       : { min: ZERO, max: ZERO },
     impactKnown: estimate !== null,
     message: estimate
@@ -218,7 +222,10 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
       if (v) {
         tradeValue = v.value;
       } else {
-        out.push(missingPrice(ctx, receivedFiat ? e.sent : e.received, at, e.id, 'raises'));
+        // Sale: proceeds are missing (raises tax). Purchase with another fiat: basis is
+        // missing (lowers later gains). Swap: both, so it could go either way.
+        const direction: PriceEffect = receivedFiat ? 'raises' : sentFiat ? 'lowers' : 'either';
+        out.push(missingPrice(ctx, receivedFiat ? e.sent : e.received, at, e.id, direction));
         tradeValue = ZERO;
         tradeKnown = false;
       }

@@ -157,6 +157,7 @@ type Issue = {
 - **Trade fees paid in crypto** are applied after the trade's acquisition, so a fee charged in the asset just received comes out of those units.
 - **Missing prices** are valued at 0 in every reported figure. For ranking only, impact is estimated from the nearest quote at any distance in time, or from the stated value via the nearest FX quote:
   - unpriced proceeds or taxable income: `{0, estimate}`;
+  - unpriced purchase in another fiat (missing basis lowers later gains): `{−estimate, 0}`;
   - fees and non-taxable receipts: `{−estimate, +estimate}`.
 
   With no quote at all, the impact is unknown.
@@ -179,6 +180,9 @@ type Issue = {
   Exact box/code mapping is pending verification against IRS instructions.
 
 ## 10. Determinism and reproducibility
+
+- **Same-instant ordering.** Events at the same timestamp are applied as: opening positions, then events that acquire units, then everything else, then by id. Exports often share a second between a buy and a sell and list rows newest-first, so file order and ids can't decide it.
+- **Lots carry their rule citations** (`Lot.ruleRefs`, e.g. trade-fee capitalisation, income basis, Rev. Proc. 2024-28 safe harbor). Child lots created by transfers inherit them, and disposals include the consumed lot's citations.
 
 - A report is identified by `hash(normalized ledger, overrides, engine version, rule-pack version, price snapshot)`.
 - Re-running with the same hash must produce byte-identical output. A CI golden-file suite enforces this.

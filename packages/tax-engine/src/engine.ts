@@ -44,7 +44,12 @@ export const ENGINE_VERSION = '0.1.0';
 /** One thing that happens at a point in time: a ledger event or a declared opening position. */
 interface Item {
   ms: number;
-  rank: number; // opening positions apply before events at the same instant
+  /**
+   * Order within the same instant: opening positions (0), then events that acquire units
+   * (1), then everything else (2). Exports often share a timestamp between a buy and a sell
+   * and list rows newest-first, so file order and ids can't be trusted for ties.
+   */
+  rank: number;
   id: string;
   eventId: EventId | null;
   timestamp: Timestamp;
@@ -157,14 +162,15 @@ export function calculate(input: CalculationInput): CalculationResult {
     const year = yearOf(e.timestamp);
     if (year > input.taxYear) continue;
     const ms = parseInstant(e.timestamp);
+    const effects = effectsOfEvent(ctxFor(year), e);
     items.push({
       ms,
-      rank: 1,
+      rank: effects.some((f) => f.type === 'acquire') ? 1 : 2,
       id: e.id,
       eventId: e.id,
       timestamp: e.timestamp,
       year,
-      effects: effectsOfEvent(ctxFor(year), e),
+      effects,
     });
   }
   for (const item of items) {
@@ -274,12 +280,16 @@ export function calculate(input: CalculationInput): CalculationResult {
     );
   };
 
+  const lotsById = new Map<string, Lot>();
   const newLot = (fields: Omit<Lot, 'id'>, id: string): Lot => {
     const lot: Lot = { id, ...fields };
     if (lot.quantity.isZero()) return lot;
     lots.push(lot);
+    lotsById.set(id, lot);
     return lot;
   };
+  const lotRules = (lotId: string | null): RuleId[] =>
+    lotId ? (lotsById.get(lotId)?.ruleRefs ?? []) : [];
 
   // --- Apply effects ----------------------------------------------------------------------
   const apply = (item: Item, eff: Effect, seq: number): void => {
@@ -306,6 +316,7 @@ export function calculate(input: CalculationInput): CalculationResult {
             origin: eff.origin,
             eventId: item.eventId,
             parentLotId: null,
+            ruleRefs: eff.ruleRefs,
           },
           `${baseId}#${seq}`,
         );
@@ -375,6 +386,7 @@ export function calculate(input: CalculationInput): CalculationResult {
             basisShortfall: part.shortfall,
             ruleRefs: dedupe([
               ...eff.ruleRefs,
+              ...lotRules(part.lotId),
               rules.costBasis.rule,
               rules.basisScopeRule,
               ...(term && rules.holdingPeriod ? [rules.holdingPeriod.rule] : []),
@@ -400,6 +412,7 @@ export function calculate(input: CalculationInput): CalculationResult {
               origin: 'transfer',
               eventId: item.eventId,
               parentLotId: part.lotId,
+              ruleRefs: lotRules(part.lotId),
             },
             part.lotId ? `${part.lotId}>${baseId}` : `${baseId}#${seq}.${i}`,
           );
@@ -422,6 +435,7 @@ export function calculate(input: CalculationInput): CalculationResult {
                 origin: 'shortfall',
                 eventId: item.eventId,
                 parentLotId: null,
+                ruleRefs: [],
               },
               `${baseId}#${seq}.shortfall`,
             ),
@@ -487,6 +501,7 @@ export function calculate(input: CalculationInput): CalculationResult {
                 origin: 'opening_position',
                 eventId: null,
                 parentLotId: null,
+                ruleRefs: eff.ruleRefs,
               },
               `${item.id}#${i}`,
             ),

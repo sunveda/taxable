@@ -57,7 +57,7 @@ acquisitions before any of that year's disposals, which is why effects are compu
 flowchart TD
   start(["calculate(input)"]) --> tz["Resolve time zone<br/>(user's for US, Asia/Tokyo for JP)"]
   tz --> items["For every event and opening position up to the tax year:<br/>compute effects (pure, no pool state)"]
-  items --> sort["Sort by time → opening positions first → id<br/>(deterministic)"]
+  items --> sort["Sort by time; at the same instant: opening positions,<br/>then events that acquire units, then the rest; then id"]
   sort --> yloop{"Next year ≤ tax year?"}
   yloop -- yes --> pre["Sum the year's acquisitions per total-average pool<br/>→ pool.beginYear()"]
   pre --> apply["Apply each item's effects in order<br/>acquire · dispose · move · remove · reset ·<br/>income · expense · issue"]
@@ -148,13 +148,13 @@ flowchart TD
   f1 -- no --> skip["skip"]
   f1 -- yes --> f2{"Same asset?"}
   f2 -- no --> skip
-  f2 -- yes --> f3{"Arrives 0–72 h after?"}
+  f2 -- yes --> f3{"Stamped from 30 min before<br/>to 72 h after?"}
   f3 -- no --> skip
   f3 -- yes --> f4{"Received ≤ sent and<br/>shortfall ≤ 2 %?"}
   f4 -- no --> skip
   f4 -- yes --> f5{"User stated a cost basis?"}
   f5 -- yes --> skip
-  f5 -- no --> pick["Keep the closest in time<br/>(then the smallest shortfall)"]
+  f5 -- no --> pick["Keep the closest in time, either side<br/>(then the smallest shortfall)"]
   pick --> t(["transfer: A → B<br/>fee = shortfall"])
   skip --> none(["No match: stays external,<br/>appears in the fix queue"])
 ```

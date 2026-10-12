@@ -41,24 +41,19 @@ function rowToEvents(args: {
   increase: Side | null;
   decrease: Side | null;
   fee: Side | null;
-  /** JPY value of the increase, if the file states it. */
-  increaseValueJpy: Decimal | null;
   sourceRef: string;
 }): { events: LedgerEvent[]; skipped: boolean; assumption?: string } {
-  const { id, timestamp, accountId, label, increase, decrease, fee, increaseValueJpy, sourceRef } =
-    args;
+  const { id, timestamp, accountId, label, increase, decrease, fee, sourceRef } = args;
   const amt = (s: Side): AssetAmount => ({
     asset: normalizeTicker(s.asset),
     quantity: s.quantity.abs().toFixed(),
   });
-  const feeAmt =
-    fee && !fee.quantity.isZero()
-      ? fee.valueJpy && !isFiatTicker(fee.asset)
-        ? { ...amt(fee), value: { amount: fee.valueJpy.toFixed(), currency: 'JPY' } }
-        : amt(fee)
-      : undefined;
-  const valued = (a: AssetAmount): AssetAmount =>
-    increaseValueJpy ? { ...a, value: { amount: increaseValueJpy.toFixed(), currency: 'JPY' } } : a;
+  /** The amount, carrying the file's JPY value when it states one for a crypto leg. */
+  const valued = (s: Side): AssetAmount =>
+    s.valueJpy && !isFiatTicker(s.asset)
+      ? { ...amt(s), value: { amount: s.valueJpy.toFixed(), currency: 'JPY' } }
+      : amt(s);
+  const feeAmt = fee && !fee.quantity.isZero() ? valued(fee) : undefined;
 
   if (increase && decrease) {
     return {
@@ -68,8 +63,8 @@ function rowToEvents(args: {
           id,
           timestamp,
           accountId,
-          sent: amt(decrease),
-          received: amt(increase),
+          sent: valued(decrease),
+          received: valued(increase),
           ...(feeAmt ? { fee: feeAmt } : {}),
           sourceRef,
         },
@@ -88,7 +83,7 @@ function rowToEvents(args: {
         timestamp,
         accountId,
         incomeType,
-        received: valued(amt(increase)),
+        received: valued(increase),
         sourceRef,
       });
     } else {
@@ -97,7 +92,7 @@ function rowToEvents(args: {
         id,
         timestamp,
         accountId,
-        received: valued(amt(increase)),
+        received: valued(increase),
         sourceRef,
       });
     }
@@ -186,7 +181,6 @@ export const jpIndustryStandardCsv: CsvImporter = {
         increase,
         decrease,
         fee,
-        increaseValueJpy: null,
         sourceRef: `line ${line}`,
       });
       events.push(...r.events);
@@ -285,18 +279,23 @@ export const bitflyerCsv: CsvImporter = {
         fee = { asset: 'JPY', quantity: feeJpy };
       }
 
-      const inc = increase[0] ?? null;
-      const valueJpy =
-        inc && inc.asset === c1 && !rate.isZero() ? inc.quantity.abs().times(rate) : null;
+      // 通貨1の対円レート values the 通貨1 leg in yen, whichever side it is on. On a
+      // crypto-for-crypto trade that is the only price the file gives.
+      const withRate = (leg: Side | undefined): Side | null =>
+        !leg
+          ? null
+          : leg.asset === c1 && !rate.isZero()
+            ? { ...leg, valueJpy: leg.quantity.abs().times(rate) }
+            : leg;
+      const inc = withRate(increase[0]);
       const r = rowToEvents({
         id: ids.next(cells),
         timestamp,
         accountId: ctx.accountId,
         label: cells['取引種別'] ?? '',
         increase: inc,
-        decrease: decrease[0] ?? null,
+        decrease: withRate(decrease[0]),
         fee,
-        increaseValueJpy: valueJpy,
         sourceRef: `line ${line}`,
       });
       events.push(...r.events);

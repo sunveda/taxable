@@ -45,6 +45,19 @@ export function parseTimestamp(
   const m = DATE_TIME.exec(toHalfWidth(raw).trim());
   if (!m) return null;
   const [, y, mo, d, h, mi, sec = '00', frac = '', zone] = m;
+  // Date.parse rolls impossible dates over (2025-02-30 → 2 March), so check the calendar.
+  const [yn, mon, dn, hn, mn, sn] = [y, mo, d, h, mi, sec].map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const daysInMonth = new Date(Date.UTC(yn, mon, 0)).getUTCDate();
+  if (mon < 1 || mon > 12 || dn < 1 || dn > daysInMonth || hn > 23 || mn > 59 || sn > 59) {
+    return null;
+  }
   const pad = (v: string | undefined): string => (v ?? '').padStart(2, '0');
   let offset: string = defaultOffset;
   if (zone) {
