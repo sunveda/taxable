@@ -59,6 +59,18 @@ backend (in-memory, seeded with Japanese sample data) so every screen works. To 
 set `SVDT_API_URL`, `SVDT_API_KEY` and `SVDT_USER_ID` (the app acts as that one user until session
 login exists).
 
+### Deployment (Vercel, Tokyo)
+
+| Project            | Root       | Serves                                                                                            |
+| ------------------ | ---------- | ------------------------------------------------------------------------------------------------- |
+| `svdt-taxable`     | `apps/web` | the web app, functions in `hnd1` (`apps/web/vercel.json`)                                         |
+| `svdt-taxable-api` | `apps/api` | https://svdt-taxable-api.vercel.app, one function in `hnd1` (`apps/api/scripts/build-vercel.mjs`) |
+
+The database is Supabase in Tokyo (Vercel Marketplace), connected to `svdt-taxable-api`, which gets
+`POSTGRES_URL` from the integration and `DATABASE_CA_CERT` (Supabase Root 2021 CA). Migrations are an
+operator step, run against `POSTGRES_URL_NON_POOLING`. The web project has `SVDT_API_URL`,
+`SVDT_API_KEY` (sensitive) and `SVDT_USER_ID`.
+
 ### API
 
 Without `DATABASE_URL`, the API uses an embedded Postgres (PGlite) in `apps/api/.data/`, so no
@@ -69,8 +81,8 @@ pnpm --filter @svdt/api create-key -- --name local   # prints an API key once
 pnpm --filter @svdt/api dev                          # http://localhost:8787/v1/openapi.json
 ```
 
-With `DATABASE_URL=postgres://…` (e.g. Neon from the Vercel Marketplace), run
-`pnpm --filter @svdt/api migrate` first. Then, for example:
+With `DATABASE_URL=postgres://…`, run `pnpm --filter @svdt/api migrate` first. For a database signed by
+its own CA (Supabase), also set `DATABASE_CA_CERT` to the CA's PEM text. Then, for example:
 
 ```sh
 curl -X POST localhost:8787/v1/users -H "authorization: Bearer $KEY" -H 'content-type: application/json' -d '{}'
