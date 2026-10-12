@@ -76,6 +76,9 @@ function FixQueue({ result, pack }: { result: CalculationResult; pack: RulePack 
                   : `Up to ${money(swing.abs(), pack)}`}
             </span>{' '}
             — {i.message}
+            {i.suggestedResolution && (
+              <div className="muted">Suggested fix: {i.suggestedResolution.message}</div>
+            )}
           </li>
         );
       })}

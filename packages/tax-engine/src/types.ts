@@ -3,6 +3,7 @@ import type {
   AssetId,
   CurrencyCode,
   Decimal,
+  DecimalString,
   EventId,
   IncomeType,
   LedgerEvent,
@@ -25,6 +26,55 @@ export interface CalculationInput {
   };
   /** Taxpayer's IANA time zone. Only honoured when the rule pack takes it from the user. */
   timeZone?: string;
+  /** User/accountant corrections (ADR-0009), in any order. Latest active one per target wins. */
+  overrides?: readonly Override[];
+}
+
+/**
+ * A correction from the fix queue. Keyed on a stable event id so it survives
+ * re-normalization; amounts are in the report currency.
+ */
+export type OverrideAction =
+  /** Price for an asset in this event (resolves `missing_price`). */
+  | { type: 'set_unit_price'; asset: AssetId; unitPrice: DecimalString }
+  /** Original basis of an external deposit (resolves `missing_basis`). */
+  | { type: 'set_cost_basis'; costBasis: DecimalString; acquiredAt?: Timestamp }
+  /**
+   * What an external withdrawal was (resolves `unmatched_withdrawal`): a move to a wallet
+   * the user owns, or crypto sold or spent (a disposal, at `proceeds` or market value).
+   */
+  | { type: 'classify_withdrawal'; as: 'own_wallet' | 'spent'; proceeds?: DecimalString }
+  /** Withdraws an earlier override on the same event. */
+  | { type: 'revoke'; overrideId: string };
+
+export interface Override {
+  id: string;
+  eventId: EventId;
+  createdAt: Timestamp;
+  author: string;
+  note?: string;
+  action: OverrideAction;
+}
+
+export interface OverrideOutcome {
+  overrideId: string;
+  eventId: EventId;
+  /**
+   * `applied`: in effect. `superseded`: a later override replaced it. `revoked`: withdrawn.
+   * `event_not_found`: its event is gone (e.g. after re-import); `not_applicable`: it
+   * doesn't fit its event (see `reason`). The last two also raise an issue.
+   */
+  status: 'applied' | 'superseded' | 'revoked' | 'event_not_found' | 'not_applicable';
+  reason?: string;
+}
+
+/** A ready-to-apply override the fix queue can offer as a one-tap resolution. */
+export interface SuggestedResolution {
+  override: { eventId: EventId; action: OverrideAction };
+  /** 0–1: how likely this is the right answer. A heuristic, not a probability. */
+  confidence: number;
+  message: string;
+  params: Record<string, string>;
 }
 
 export type LotOrigin =
@@ -60,7 +110,8 @@ export interface ConsumedPart {
   acquiredAt: Timestamp | null;
 }
 
-export type DisposalKind = 'sale' | 'swap' | 'fee';
+/** `spend`: crypto sent out and reclassified by the user as sold or spent. */
+export type DisposalKind = 'sale' | 'swap' | 'fee' | 'spend';
 
 /** One line of realized gain or loss. Lot-based methods emit one line per lot consumed. */
 export interface Disposal {
@@ -121,7 +172,9 @@ export type IssueKind =
   | 'opening_position_mismatch'
   | 'opening_position_order'
   | 'basis_currency_mismatch'
-  | 'unsupported_history_year';
+  | 'unsupported_history_year'
+  | 'orphaned_override'
+  | 'invalid_override';
 
 /**
  * Something the user should review. `impact` is the plausible change to taxable amounts
@@ -142,6 +195,8 @@ export interface Issue {
   /** Plain-language explanation. UI layers localize by `kind` + `params`. */
   message: string;
   params: Record<string, string>;
+  /** Present when there is a defensible default; absent when only the user can know. */
+  suggestedResolution?: SuggestedResolution;
 }
 
 export interface Holding {
@@ -238,5 +293,7 @@ export interface CalculationResult {
   holdings: Holding[];
   /** Fix queue: ordered by absolute impact, largest first. */
   issues: Issue[];
+  /** What happened to each input override, oldest first. */
+  overrides: OverrideOutcome[];
   summary: UsSummary | JpSummary;
 }

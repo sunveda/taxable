@@ -1,6 +1,6 @@
 # Tax Engine Spec
 
-_Status: Draft v0.2 · Last updated: 2026-10-12 · Implementation: `packages/tax-engine` v0.1.0 (see §13)_
+_Status: Draft v0.2 · Last updated: 2026-10-12 · Implementation: `packages/tax-engine` v0.2.0 (see §13)_
 
 The tax engine is the product. It is a **pure, deterministic library**
 ([ADR-0006](../adr/0006-tax-engine-pure-library.md)). It turns a normalized ledger plus a
@@ -143,7 +143,7 @@ type Issue = {
   eventIds: EventId[];
   impact: { min: Money; max: Money };  // change in taxable amount across plausible resolutions
   impactKnown: boolean;                // false when there is nothing to estimate from
-  suggestedResolution?: Resolution;    // with confidence (planned; not in v0.1)
+  suggestedResolution?: { override; confidence: number; message; params }; // ready-to-apply override
   explanation: string;                 // plain language, i18n key + params
 };
 ```
@@ -161,7 +161,28 @@ type Issue = {
   - fees and non-taxable receipts: `{−estimate, +estimate}`.
 
   With no quote at all, the impact is unknown.
-- Dust-level issues are auto-resolved with the default resolution and logged.
+- **Suggested resolutions** are offered only where there is a defensible default. Each is a ready-to-apply override (§8.1), so accepting it is one tap:
+  - `missing_price` → `set_unit_price` at the nearest quote. Confidence by the quote's distance in time: ≤ 1 day 0.8, ≤ 7 days 0.6, ≤ 30 days 0.4, else 0.2. None when there is no quote.
+  - `unmatched_withdrawal` → `classify_withdrawal: own_wallet` (§4's default), confidence 0.5.
+  - None for `missing_basis`, `negative_balance` and the rest: only the user knows what they paid or what history is missing, and a guess could understate tax.
+- Dust-level issues are auto-resolved with the default resolution and logged. _(Not built yet.)_
+
+### 8.1 Overrides (ADR-0009)
+
+`CalculationInput.overrides` is the override layer: `{ id, eventId, createdAt, author, note?, action }`, append-only. Amounts are in the report currency.
+
+| Action | Applies to | Effect |
+|---|---|---|
+| `set_unit_price { asset, unitPrice }` | any event holding that asset | Values every amount of that asset in the event (incl. fees). Resolves `missing_price`. |
+| `set_cost_basis { costBasis, acquiredAt? }` | `external_deposit` | Sets basis and, optionally, the original acquisition date (holding period). Resolves `missing_basis`. |
+| `classify_withdrawal { as: own_wallet }` | `external_withdrawal` | Confirms a move to the user's own wallet: not taxable; clears `unmatched_withdrawal`. |
+| `classify_withdrawal { as: spent, proceeds? }` | `external_withdrawal` | A disposal (`kind: 'spend'`) at `proceeds` or market value; `missing_price` if neither. |
+| `revoke { overrideId }` | same event as the target | Withdraws an earlier override. |
+
+- **Latest active override wins** per target (event + action type, + asset for prices), ordered by `createdAt` then id; earlier ones are `superseded`.
+- An override that doesn't fit its event (wrong kind, negative amount, acquisition after receipt, …) is ignored, never takes the slot from a valid earlier one, and raises `invalid_override` (zero impact; the original issue still shows its own).
+- An override whose event is gone (e.g. after re-import) raises `orphaned_override` with unknown impact; it is never silently dropped.
+- `CalculationResult.overrides` reports every override's status: `applied`, `superseded`, `revoked`, `event_not_found` or `not_applicable` (with `reason`).
 - **Negative balance** issues (sold more than acquired) are a major source of errors in
   incumbents. Their impact assumes zero basis until resolved.
 
@@ -208,7 +229,7 @@ interface. See [ADR-0003](../adr/0003-typescript-across-the-stack.md).
   - determinism.
 - **Fuzzing of importers** with malformed CSVs.
 
-## 13. Implementation status (v0.1.0)
+## 13. Implementation status (v0.2.0)
 
 | Area | Status |
 |---|---|
@@ -222,6 +243,7 @@ interface. See [ADR-0003](../adr/0003-typescript-across-the-stack.md).
 | Valuation: report-currency side → event value → price quote (≤ 24 h old) → FX-converted value | ✅ |
 | Opening positions, incl. US Rev. Proc. 2024-28 safe-harbor allocation with mismatch check | ✅ |
 | Fix queue: missing price/basis, negative balance, unmatched withdrawal, invalid method, opening-position problems; ordered by impact | ✅ |
+| Suggested resolutions (missing price, unmatched withdrawal) and override layer: price, basis, withdrawal classification, revoke; latest wins; orphaned/invalid overrides become issues | ✅ (overrides are engine input; storing them needs `apps/api`) |
 | US summary (short/long buckets, ordinary income, Form 8949 lines) | ✅ (checkbox G–L assignment awaits 1099-DA reconciliation) |
 | JP summary (雑所得: disposals + income − expenses; loss not offsettable) | ✅ |
 | Golden scenarios + property tests (conservation, determinism) | ✅ `packages/tax-engine/test` |

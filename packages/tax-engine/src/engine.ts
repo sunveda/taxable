@@ -24,6 +24,7 @@ import {
   type EffectContext,
 } from './effects';
 import { sortIssues } from './issues';
+import { resolveOverrides } from './overrides';
 import { createPool, TotalAveragePool, type Pool } from './pools';
 import { summarize } from './summary';
 import type {
@@ -39,7 +40,7 @@ import type {
 } from './types';
 import { Valuer } from './valuation';
 
-export const ENGINE_VERSION = '0.1.0';
+export const ENGINE_VERSION = '0.2.0';
 
 /** One thing that happens at a point in time: a ledger event or a declared opening position. */
 interface Item {
@@ -77,6 +78,44 @@ export function calculate(input: CalculationInput): CalculationResult {
     issueIds.add(id);
     issues.push({ id, ...issue });
   };
+
+  // --- Override layer (ADR-0009) ----------------------------------------------------------
+  const resolved = resolveOverrides(input.events, input.overrides ?? [], pack.reportingCurrency);
+  const eventsById = new Map(resolved.events.map((e) => [e.id, e]));
+  for (const o of resolved.outcomes) {
+    if (o.status === 'event_not_found') {
+      addIssue(
+        {
+          kind: 'orphaned_override',
+          eventIds: [o.eventId],
+          asset: null,
+          taxYear: input.taxYear,
+          impact: { min: ZERO, max: ZERO },
+          impactKnown: false,
+          message: `Correction ${o.overrideId} points to event ${o.eventId}, which is no longer in the imported data (it may have been re-imported under a different id). It was not applied.`,
+          params: { overrideId: o.overrideId, eventId: o.eventId },
+        },
+        o.overrideId,
+      );
+    } else if (o.status === 'not_applicable') {
+      const event = eventsById.get(o.eventId)!;
+      const year = yearOf(event.timestamp);
+      if (year > input.taxYear) continue;
+      addIssue(
+        {
+          kind: 'invalid_override',
+          eventIds: [o.eventId],
+          asset: null,
+          taxYear: year,
+          impact: { min: ZERO, max: ZERO },
+          impactKnown: true,
+          message: `Correction ${o.overrideId} can't be applied to event ${o.eventId} (${o.reason ?? 'invalid'}); it was ignored.`,
+          params: { overrideId: o.overrideId, eventId: o.eventId, reason: o.reason ?? '' },
+        },
+        o.overrideId,
+      );
+    }
+  }
 
   // --- Cost-basis method per asset ------------------------------------------------------
   const methods: Record<AssetId, CostBasisMethod> = {};
@@ -154,11 +193,12 @@ export function calculate(input: CalculationInput): CalculationResult {
     rules: rulesFor(year),
     valuer,
     reportingCurrency: pack.reportingCurrency,
+    withdrawals: resolved.withdrawals,
   });
 
   const items: Item[] = [];
   const firstEventMs = new Map<AssetId, number>();
-  for (const e of input.events) {
+  for (const e of resolved.events) {
     const year = yearOf(e.timestamp);
     if (year > input.taxYear) continue;
     const ms = parseInstant(e.timestamp);
@@ -448,6 +488,7 @@ export function calculate(input: CalculationInput): CalculationResult {
         adjustPhysical(eff.accountId, eff.asset, eff.quantity.negated());
         const removedBasis = parts.reduce((acc, p) => acc.plus(p.costBasis), ZERO);
         if (!shortfall.isZero()) shortfallIssue(item, eff.asset, shortfall, null, 'Sends');
+        if (eff.confirmedOwnWallet) return;
         const potentialGain = eff.marketValue ? eff.marketValue.minus(removedBasis) : ZERO;
         addIssue(
           {
@@ -459,6 +500,21 @@ export function calculate(input: CalculationInput): CalculationResult {
             impactKnown: eff.marketValue !== null,
             message: `${eff.quantity.toString()} ${eff.asset} left to a wallet that isn't connected. Treated as a move to your own wallet (not taxable). If it was a payment or sale, it is taxable.`,
             params: { asset: eff.asset, quantity: eff.quantity.toString() },
+            // Spec §4: the default is a move to a wallet the user owns, which isn't a
+            // disposal. Accepting it confirms what the engine already assumes.
+            ...(eff.withdrawal && item.eventId
+              ? {
+                  suggestedResolution: {
+                    override: {
+                      eventId: item.eventId,
+                      action: { type: 'classify_withdrawal' as const, as: 'own_wallet' as const },
+                    },
+                    confidence: 0.5,
+                    message: `Confirm this went to a wallet you own. If it was sold or spent, classify it as spent instead.`,
+                    params: {},
+                  },
+                }
+              : {}),
           },
           `${baseId}:${seq}`,
         );
@@ -597,6 +653,7 @@ export function calculate(input: CalculationInput): CalculationResult {
     lots,
     holdings,
     issues: sortIssues(issues),
+    overrides: resolved.outcomes,
     summary: summarize(pack, { disposals, income, expenses }, timeZone),
   };
 }

@@ -24,7 +24,7 @@ Legend: ✅ done · 🟡 partial · ⏳ not started. "Open" is the market score 
 | # | Gap | Market still open? | Our status | What exists | What's missing |
 |---|---|---|---|---|---|
 | G1 | Explainability | **Yes** (4, was 5) | 🟡 | Engine emits provenance: disposal → lot → event, parent/child lots across transfers, `ruleRefs` with legal citations (ADR-0012). Demo page has a "why this basis" column. | `explain` API and DAG view; plain-language explanation templates (i18n, EN/JA); provenance for prices used (the valuation source is computed but not exposed on records). |
-| G2 | Fix what matters (impact-ranked) | **Yes** (4) | 🟡 | Fix queue sorted by impact: negative balance, missing basis, unmatched withdrawal, invalid method, opening-position problems. Missing prices are estimated for ranking, and unknown impacts are never buried (D1 fixed). | Suggested resolutions (spec §8); an override layer to apply fixes (ADR-0009); impact estimates for opening-position mismatches. |
+| G2 | Fix what matters (impact-ranked) | **Yes** (4) | 🟡 | Fix queue sorted by impact: negative balance, missing basis, unmatched withdrawal, invalid method, opening-position problems. Missing prices are estimated for ranking, and unknown impacts are never buried (D1 fixed). Suggested resolutions and an override layer (D2 fixed, engine 0.2.0). | Persisting overrides (needs `apps/api`); more suggestion types; impact estimates for opening-position mismatches. |
 | G3 | 1099-DA reconciliation | **Narrowing** (2, was 4) | ⏳ | Spec (tax-engine-spec §9); Form 8949 lines exist. | 1099-DA import (CSV/PDF); line matching; G–L box and adjustment codes; basis supply for noncovered lots. **Deadline: US filing season Jan–Apr 2027.** |
 | G4 | Basis Passport | **Yes** (5) | ⏳ | Lots with full provenance (the data the passport would sign). | Signed statement format, signing keys, verification API, legal review. |
 | G5 | Fair pricing (not per tx) | **Yes** (4); Japan locals also price per tx | ⏳ | Hypothesis in product spec. | Spam/dust detection (pricing depends on excluding it); billing; Japan-specific pricing given ¥4–6k local price points. |
@@ -39,7 +39,7 @@ Legend: ✅ done · 🟡 partial · ⏳ not started. "Open" is the market score 
 | # | Finding | Where | Suggested fix |
 |---|---|---|---|
 | D1 | ~~`missing_price` impact hard-coded to 0, contradicting "fix queue ordered by impact"~~ **Fixed 2026-10-12:** impact is estimated from the nearest quote (ranking only); with no quote, `impactKnown: false`, ranked between known non-zero and known-zero issues | `packages/tax-engine/src/effects.ts`, `issues.ts` | Regression tests in `packages/tax-engine/test/fix-queue.test.ts` |
-| D2 | `Issue.suggestedResolution` is in the spec but not the type | tax-engine-spec §8 | Add once the override layer exists, or mark it as planned in §13. |
+| D2 | ~~`Issue.suggestedResolution` is in the spec but not the type~~ **Fixed 2026-10-12:** suggested resolutions for missing prices and unmatched withdrawals, plus the override layer (engine 0.2.0) | tax-engine-spec §8, §8.1 | Tests in `packages/tax-engine/test/overrides.test.ts` |
 | D3 | The web demo computes inside a Next.js server component, but ADR-0011 says the web app is an API client | `apps/web/app/page.tsx` vs ADR-0011 | Acceptable for a demo. Must move behind `apps/api` before any real user data. |
 | D4 | Competitive landscape lacks Japanese competitors | `competitive-landscape.md` | Added in this review (§2 of that doc). |
 | D5 | Gap analysis still scores G3 as wide open | `gap-analysis.md` | Revised there, with a pointer to this review. |
@@ -52,7 +52,7 @@ Legend: ✅ done · 🟡 partial · ⏳ not started. "Open" is the market score 
 US tax season starts in January 2027. Japan's filing season is mid-February to mid-March 2027.
 
 1. **Unblock data:** get anonymized real exports (Coinbase, Kraken, bitFlyer, Coincheck) and mark the importers verified. Without this, nothing reaches users.
-2. **Fix queue quality (G2, D1, D2):** missing-price impact, suggested resolutions, override layer. This is the core differentiator and is cheap to build on the existing engine.
+2. ~~**Fix queue quality (G2, D1, D2):** missing-price impact, suggested resolutions, override layer.~~ Done in the engine 2026-10-12; overrides still need storage (item 3).
 3. **`apps/api` + persistence (D3, ADR-0009/0010/0011):** needed for any real user, for B2B, and for mobile.
 4. **1099-DA reconciliation (G3)**, built deep: line-level matching, 8949 boxes and codes, basis supply. It's parity, but parity we must have by January.
 5. **Explain API + UI (G1, D8):** the drill-down that shows rules and citations, in English and Japanese.

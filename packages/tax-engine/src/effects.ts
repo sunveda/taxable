@@ -13,7 +13,8 @@ import {
   type Timestamp,
 } from '@svdt/domain';
 import type { RuleId, YearRules } from '@svdt/rule-packs';
-import type { DisposalKind, IssueKind, LotOrigin } from './types';
+import type { WithdrawalTreatment } from './overrides';
+import type { DisposalKind, IssueKind, LotOrigin, SuggestedResolution } from './types';
 import type { Valuer } from './valuation';
 
 /**
@@ -57,6 +58,10 @@ export type Effect =
       asset: AssetId;
       quantity: Decimal;
       marketValue: Decimal | null;
+      /** An external withdrawal (not a non-disposal fee), so the user can classify it. */
+      withdrawal: boolean;
+      /** The user confirmed it went to a wallet they own: no issue. */
+      confirmedOwnWallet: boolean;
     }
   | {
       type: 'income';
@@ -91,12 +96,25 @@ export type Effect =
       impactKnown: boolean;
       message: string;
       params: Record<string, string>;
+      suggestedResolution?: SuggestedResolution;
     };
 
 export interface EffectContext {
   rules: YearRules;
   valuer: Valuer;
   reportingCurrency: string;
+  /** User classifications of external withdrawals (override layer). */
+  withdrawals: ReadonlyMap<EventId, WithdrawalTreatment>;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Confidence in a suggested price, by how far the quote is from the event. */
+function priceConfidence(ageMs: number): number {
+  if (ageMs <= DAY_MS) return 0.8;
+  if (ageMs <= 7 * DAY_MS) return 0.6;
+  if (ageMs <= 30 * DAY_MS) return 0.4;
+  return 0.2;
 }
 
 /**
@@ -114,13 +132,15 @@ function missingPrice(
   eventId: EventId,
   effect: PriceEffect,
 ): Effect {
-  const estimate = ctx.valuer.estimate(amount, at);
+  const detail = ctx.valuer.estimateDetail(amount, at);
+  const estimate = detail?.value ?? null;
   const params: Record<string, string> = {
     asset: amount.asset,
     quantity: amount.quantity,
     eventId,
   };
   if (estimate) params['estimate'] = estimate.toFixed();
+  const unitPrice = detail?.unitPrice?.toFixed();
   return {
     type: 'issue',
     kind: 'missing_price',
@@ -136,6 +156,19 @@ function missingPrice(
       ? `No price for ${amount.quantity} ${amount.asset} at this time; valued at 0 until a price is provided (roughly ${estimate.toFixed(2)} ${ctx.reportingCurrency} from the nearest known price).`
       : `No price for ${amount.quantity} ${amount.asset}; valued at 0 until a price is provided. Impact unknown.`,
     params,
+    ...(detail && unitPrice !== undefined
+      ? {
+          suggestedResolution: {
+            override: {
+              eventId,
+              action: { type: 'set_unit_price', asset: amount.asset, unitPrice },
+            },
+            confidence: priceConfidence(detail.ageMs),
+            message: `Use ${unitPrice} ${ctx.reportingCurrency} per ${amount.asset}, the nearest known price (quoted ${detail.quotedAt}).`,
+            params: { unitPrice, quotedAt: detail.quotedAt },
+          },
+        }
+      : {}),
   };
 }
 
@@ -185,6 +218,8 @@ function feeEffects(
         asset: fee.asset,
         quantity,
         marketValue: feeValue.known ? feeValue.value : null,
+        withdrawal: false,
+        confirmedOwnWallet: false,
       });
     }
   }
@@ -382,6 +417,26 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
 
     case 'external_withdrawal': {
       if (isFiat(e.sent.asset)) return out;
+      const treatment = ctx.withdrawals.get(e.id);
+      if (treatment?.as === 'spent') {
+        // The user says it was sold or spent: a disposal at the stated proceeds, or at
+        // market value.
+        const proceeds = treatment.proceeds
+          ? { value: treatment.proceeds, known: true }
+          : valueOrIssue(ctx, e.sent, at, e.id, out, 'raises');
+        out.push({
+          type: 'dispose',
+          kind: 'spend',
+          accountId: e.accountId,
+          asset: e.sent.asset,
+          quantity: dec(e.sent.quantity),
+          proceeds: proceeds.value,
+          sellingCosts: ZERO,
+          proceedsKnown: proceeds.known,
+          ruleRefs: [],
+        });
+        return out;
+      }
       const market = ctx.valuer.valueOrEstimate(e.sent, at);
       out.push({
         type: 'remove',
@@ -389,6 +444,8 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
         asset: e.sent.asset,
         quantity: dec(e.sent.quantity),
         marketValue: market,
+        withdrawal: true,
+        confirmedOwnWallet: treatment?.as === 'own_wallet',
       });
       return out;
     }

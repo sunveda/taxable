@@ -25,6 +25,15 @@ export interface Valuation {
   via: ValuationSource;
 }
 
+export interface Estimate {
+  value: Decimal;
+  /** Value per unit; `null` for a zero quantity converted from a stated value. */
+  unitPrice: Decimal | null;
+  quotedAt: Timestamp;
+  /** Distance in time between the quote and the event. */
+  ageMs: number;
+}
+
 interface IndexedQuote {
   ms: number;
   quote: PriceQuote;
@@ -94,13 +103,32 @@ export class Valuer {
    * nearest FX quote.
    */
   estimate(amount: AssetAmount, at: Timestamp): Decimal | null {
+    return this.estimateDetail(amount, at)?.value ?? null;
+  }
+
+  /** `estimate` plus the implied unit price and the quote it came from. */
+  estimateDetail(amount: AssetAmount, at: Timestamp): Estimate | null {
     const quantity = dec(amount.quantity);
     const near = this.nearest(amount.asset, at);
-    if (near) return quantity.times(dec(near.unitPrice));
+    if (near) {
+      return {
+        value: quantity.times(dec(near.unitPrice)),
+        unitPrice: dec(near.unitPrice),
+        quotedAt: near.timestamp,
+        ageMs: Math.abs(parseInstant(near.timestamp) - parseInstant(at)),
+      };
+    }
     const otherFiat = amount.value ? amount.value.currency : fiatCurrency(amount.asset);
     const fx = otherFiat ? this.nearest(fiatAsset(otherFiat), at) : null;
-    if (fx) return (amount.value ? dec(amount.value.amount) : quantity).times(dec(fx.unitPrice));
-    return null;
+    if (!fx) return null;
+    const value = (amount.value ? dec(amount.value.amount) : quantity).times(dec(fx.unitPrice));
+    return {
+      value,
+      // Rounded: a converted price is a suggestion to show, not an exact figure.
+      unitPrice: quantity.isZero() ? null : value.dividedBy(quantity).toSignificantDigits(18),
+      quotedAt: fx.timestamp,
+      ageMs: Math.abs(parseInstant(fx.timestamp) - parseInstant(at)),
+    };
   }
 
   private nearest(asset: AssetId, at: Timestamp): PriceQuote | null {
