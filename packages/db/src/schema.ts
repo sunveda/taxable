@@ -4,7 +4,7 @@ import {
   index,
   integer,
   jsonb,
-  pgTable,
+  pgSchema,
   primaryKey,
   text,
   timestamp,
@@ -18,16 +18,18 @@ import {
 const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
   dataType: () => 'bytea',
 });
+/** Our own schema, never `public` (see the migration header). */
+const svdt = pgSchema('svdt');
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
-export const tenants = pgTable('tenants', {
+export const tenants = svdt.table('tenants', {
   id: uuid('id').primaryKey().defaultRandom(),
   slug: text('slug').notNull().unique(),
   name: text('name').notNull(),
   createdAt: ts('created_at').notNull().defaultNow(),
 });
 
-export const users = pgTable(
+export const users = svdt.table(
   'users',
   {
     tenantId: uuid('tenant_id').notNull(),
@@ -38,7 +40,7 @@ export const users = pgTable(
   (t) => [primaryKey({ columns: [t.tenantId, t.id] })],
 );
 
-export const accounts = pgTable(
+export const accounts = svdt.table(
   'accounts',
   {
     tenantId: uuid('tenant_id').notNull(),
@@ -49,7 +51,7 @@ export const accounts = pgTable(
   (t) => [primaryKey({ columns: [t.tenantId, t.userId, t.name] })],
 );
 
-export const rawBlobs = pgTable(
+export const rawBlobs = svdt.table(
   'raw_blobs',
   {
     tenantId: uuid('tenant_id').notNull(),
@@ -61,7 +63,7 @@ export const rawBlobs = pgTable(
   (t) => [primaryKey({ columns: [t.tenantId, t.sha256] })],
 );
 
-export const imports = pgTable(
+export const imports = svdt.table(
   'imports',
   {
     tenantId: uuid('tenant_id').notNull(),
@@ -79,7 +81,7 @@ export const imports = pgTable(
   (t) => [primaryKey({ columns: [t.tenantId, t.id] })],
 );
 
-export const events = pgTable(
+export const events = svdt.table(
   'events',
   {
     tenantId: uuid('tenant_id').notNull(),
@@ -99,7 +101,7 @@ export const events = pgTable(
   ],
 );
 
-export const overrides = pgTable(
+export const overrides = svdt.table(
   'overrides',
   {
     tenantId: uuid('tenant_id').notNull(),

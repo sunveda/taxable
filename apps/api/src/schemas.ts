@@ -87,6 +87,22 @@ export const ImportSchema = z
   })
   .openapi('Import');
 
+export const ImportListSchema = z
+  .object({
+    data: z.array(
+      z.object({
+        id: z.uuid(),
+        accountName: z.string(),
+        filename: z.string().nullable(),
+        importerId: z.string(),
+        stats: z.object({ rows: z.number(), imported: z.number(), skipped: z.number() }),
+        warningCount: z.number().int(),
+        createdAt: z.string(),
+      }),
+    ),
+  })
+  .openapi('ImportList');
+
 export const EventsQuery = z.object({
   limit: z.coerce
     .number()

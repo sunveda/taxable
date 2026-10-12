@@ -265,7 +265,7 @@ describe('purge', () => {
     expect(await withTenant(database, tenantA, (tx) => purgeUser(tx, gone))).toBe(true);
 
     const blobs = (await database.db.execute(
-      sql`select encode(content, 'escape') as c from raw_blobs where tenant_id = ${tenantA} order by 1`,
+      sql`select encode(content, 'escape') as c from svdt.raw_blobs where tenant_id = ${tenantA} order by 1`,
     )) as unknown as { rows: { c: string }[] };
     // The blob only `gone` used is deleted; the one `kept` also imported survives.
     expect(blobs.rows.map((r) => r.c)).not.toContain('only-gone');
@@ -273,12 +273,91 @@ describe('purge', () => {
     for (const table of ['users', 'accounts', 'imports', 'events', 'overrides']) {
       const col = table === 'users' ? 'id' : 'user_id';
       const r = (await database.db.execute(
-        sql.raw(`select count(*)::int as n from ${table} where ${col} = '${gone}'`),
+        sql.raw(`select count(*)::int as n from svdt.${table} where ${col} = '${gone}'`),
       )) as unknown as { rows: { n: number }[] };
       expect([table, r.rows[0]!.n]).toEqual([table, 0]);
     }
     expect(await withTenant(database, tenantA, (tx) => loadLedger(tx, tenantA, kept))).toHaveLength(
       1,
     );
+  });
+});
+
+describe('hosted-platform roles (e.g. Supabase anon/authenticated/service_role)', () => {
+  const ROLES = ['anon', 'authenticated', 'service_role'];
+
+  it('get no access to anything we create, even with permissive default privileges', async () => {
+    // A fresh database set up like the most permissive hosted platform: its roles exist and
+    // are granted everything created from now on, in every schema.
+    const hosted = createDatabase();
+    try {
+      await hosted.exec(
+        ROLES.map((r) => `CREATE ROLE ${r} NOLOGIN;`).join('\n') +
+          `ALTER DEFAULT PRIVILEGES GRANT ALL ON TABLES TO ${ROLES.join(', ')};
+           ALTER DEFAULT PRIVILEGES GRANT ALL ON SEQUENCES TO ${ROLES.join(', ')};
+           ALTER DEFAULT PRIVILEGES GRANT ALL ON FUNCTIONS TO ${ROLES.join(', ')};
+           ALTER DEFAULT PRIVILEGES GRANT ALL ON SCHEMAS TO ${ROLES.join(', ')};`,
+      );
+      await migrate(hosted);
+
+      const rows = async <T>(q: ReturnType<typeof sql>) =>
+        ((await hosted.db.execute(q)) as unknown as { rows: T[] }).rows;
+      // Nothing of ours in `public`, which platforms expose as a web API.
+      expect(await rows(sql`select tablename from pg_tables where schemaname = 'public'`)).toEqual(
+        [],
+      );
+      expect(
+        await rows(sql`select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                       where n.nspname = 'public'`),
+      ).toEqual([]);
+
+      const grants = await rows<{ role: string; object: string }>(sql`
+        select r.rolname as role, c.relname as object
+          from pg_class c join pg_namespace n on n.oid = c.relnamespace
+          cross join pg_roles r
+         where n.nspname = 'svdt' and c.relkind in ('r', 'S', 'v', 'm')
+           and r.rolname in ('anon', 'authenticated', 'service_role')
+           and (has_table_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, DELETE')
+                or (c.relkind = 'S' and has_sequence_privilege(r.oid, c.oid, 'USAGE')))
+        union all
+        select r.rolname, p.proname
+          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+          cross join pg_roles r
+         where n.nspname = 'svdt' and r.rolname in ('anon', 'authenticated', 'service_role')
+           and has_function_privilege(r.oid, p.oid, 'EXECUTE')
+        union all
+        select r.rolname, 'schema svdt' from pg_roles r
+         where r.rolname in ('anon', 'authenticated', 'service_role')
+           and has_schema_privilege(r.oid, 'svdt', 'USAGE')`);
+      expect(grants).toEqual([]);
+
+      // And for real: as `anon`, nothing is reachable.
+      for (const q of [
+        'select * from svdt.api_keys',
+        'select * from svdt.events',
+        "select * from svdt.authenticate('x')",
+      ]) {
+        expect(
+          await pgError(
+            hosted.db.transaction(async (tx) => {
+              await tx.execute(sql`set local role anon`);
+              await tx.execute(sql.raw(q));
+            }),
+          ),
+        ).toMatch(/permission denied/);
+      }
+    } finally {
+      await hosted.close();
+    }
+  });
+
+  it('cannot read API key hashes even if granted the table directly', async () => {
+    const r = (await database.db.execute(sql`
+      select relrowsecurity as rls from pg_class c join pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = 'svdt' and c.relname = 'api_keys'`)) as unknown as {
+      rows: { rls: boolean }[];
+    };
+    // RLS with no policy: any non-owner role sees zero rows.
+    expect(r.rows[0]!.rls).toBe(true);
   });
 });

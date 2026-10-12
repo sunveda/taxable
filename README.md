@@ -26,7 +26,7 @@ See [ADR-0002](./docs/adr/0002-monorepo-structure.md) and [ADR-0016](./docs/adr/
 
 ```
 apps/
-  web/          Next.js app (currently a demo page that runs the engine on sample data)
+  web/          Next.js app (Japanese/English): overview, import, transactions, fix queue, report
   api/          HTTP API (Hono, OpenAPI 3.1): imports, events, overrides, calculations
   mobile/       reserved for the Expo iOS/Android app
 packages/
@@ -51,6 +51,13 @@ pnpm typecheck
 pnpm build
 pnpm --filter @svdt/web dev   # http://localhost:3000
 ```
+
+### Web app
+
+`pnpm --filter @svdt/web dev` runs the app. Without configuration it uses a built-in placeholder
+backend (in-memory, seeded with Japanese sample data) so every screen works. To use the real API,
+set `SVDT_API_URL`, `SVDT_API_KEY` and `SVDT_USER_ID` (the app acts as that one user until session
+login exists).
 
 ### API
 

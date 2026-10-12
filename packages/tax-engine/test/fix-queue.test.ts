@@ -1,7 +1,7 @@
 import { jp, us } from '@svdt/rule-packs';
 import { describe, expect, it } from 'vitest';
 import { calculate } from '../src';
-import { amt, income, jpy, s, sell, usd } from './helpers';
+import { amt, buy, income, jpy, s, sell, usd } from './helpers';
 
 /**
  * Regression tests for fix-queue ordering (gap review 2026-10, D1): a missing price used to
@@ -97,5 +97,38 @@ describe('fix queue: other unknown impacts', () => {
       ['negative_balance', false],
       ['unmatched_withdrawal', false],
     ]);
+  });
+});
+
+describe('fix queue: fees paid in a traded asset', () => {
+  it("values a BTC fee on a JPY purchase at the trade's own price, with no missing price", () => {
+    const r = calculate({
+      rulePack: jp,
+      taxYear: 2025,
+      events: [
+        buy('2025-01-10T01:00:00Z', 'bf', amt('0.1', 'BTC'), jpy('1400000'), amt('0.00015', 'BTC')),
+      ],
+    });
+    expect(r.issues.filter((i) => i.kind === 'missing_price')).toEqual([]);
+    // 0.00015 / 0.1 of ¥1,400,000.
+    const fee = r.disposals.find((d) => d.kind === 'fee')!;
+    expect(s(fee.proceeds)).toBe('2100');
+  });
+
+  it('still prefers a value the fee states itself', () => {
+    const r = calculate({
+      rulePack: jp,
+      taxYear: 2025,
+      events: [
+        buy(
+          '2025-01-10T01:00:00Z',
+          'bf',
+          amt('0.1', 'BTC'),
+          jpy('1400000'),
+          amt('0.00015', 'BTC', ['2000', 'JPY']),
+        ),
+      ],
+    });
+    expect(s(r.disposals.find((d) => d.kind === 'fee')!.proceeds)).toBe('2000');
   });
 });

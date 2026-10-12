@@ -1,145 +1,151 @@
-import { roundTo, type Decimal } from '@svdt/domain';
-import { jp, us, type RulePack } from '@svdt/rule-packs';
-import { calculate, type CalculationResult } from '@svdt/tax-engine';
-import { jpEvents, usEvents, usPrices } from './demo-data';
+import Link from 'next/link';
+import type { Calculation } from '../lib/api-types';
+import { getBackend } from '../lib/backend';
+import { getCalculation } from '../lib/data';
+import { isZero, money, sumDecimals, swing } from '../lib/format';
+import { t, type Lang } from '../lib/i18n';
+import { IssueList } from './issues';
+import { YearSwitcher } from './year-switcher';
 
-function money(value: Decimal, pack: RulePack): string {
-  const { decimalPlaces, mode } = pack.reportRounding;
-  const n = roundTo(value, decimalPlaces, mode).toFixed(decimalPlaces);
-  const [int = '0', frac] = n.replace('-', '').split('.');
-  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  const symbol = pack.reportingCurrency === 'JPY' ? '¥' : '$';
-  return `${n.startsWith('-') ? '−' : ''}${symbol}${grouped}${frac ? `.${frac}` : ''}`;
+export default async function Overview() {
+  const { session, calc, error } = await getCalculation();
+  const tr = t(session.lang);
+  const imports = await getBackend()
+    .listImports(session.userId)
+    .catch(() => []);
+  const events = imports.reduce((n, i) => n + i.stats.imported, 0);
+  // Accounts that hold or held something, as the engine saw them.
+  const accounts = new Set([
+    ...(calc?.lots.map((l) => l.accountId) ?? []),
+    ...(calc?.disposals.map((d) => d.accountId) ?? []),
+  ]).size;
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <h1>{tr.overview.title(session.taxYear)}</h1>
+          <p className="muted">
+            {tr.jurisdiction[session.jurisdiction]} · {tr.method[session.method]}
+          </p>
+        </div>
+        <YearSwitcher session={session} />
+      </div>
+
+      {error || !calc ? (
+        <div className="notice error">{error}</div>
+      ) : (
+        <>
+          <Headline calc={calc} lang={session.lang} />
+          <div className="grid">
+            <Uncertainty calc={calc} lang={session.lang} />
+            <div className="card">
+              <div className="stat-label">{tr.overview.data}</div>
+              {events === 0 ? (
+                <p className="muted small">{tr.overview.noData}</p>
+              ) : (
+                <div className="stat-value">{tr.overview.events(events)}</div>
+              )}
+              <p className="muted small">{tr.overview.accounts(accounts)}</p>
+              <Link href="/import" className="button secondary">
+                {tr.overview.importMore}
+              </Link>
+            </div>
+          </div>
+          <section className="card">
+            <div className="page-head" style={{ marginBottom: 8 }}>
+              <h2 style={{ margin: 0 }}>{tr.overview.topFixes}</h2>
+              {calc.issues.length > 3 ? <Link href="/fixes">{tr.overview.seeAll} →</Link> : null}
+            </div>
+            <IssueList
+              issues={calc.issues}
+              currency={calc.reportingCurrency}
+              lang={session.lang}
+              limit={3}
+            />
+          </section>
+        </>
+      )}
+    </>
+  );
 }
 
-function Disposals({ result, pack }: { result: CalculationResult; pack: RulePack }) {
-  const lotsById = new Map(result.lots.map((l) => [l.id, l]));
+function Headline({ calc, lang }: { calc: Calculation; lang: Lang }) {
+  const tr = t(lang);
+  const cur = calc.reportingCurrency;
+  const s = calc.summary;
+  if (s.model === 'jp_miscellaneous_income') {
+    const negative = s.reported.miscellaneousIncome.startsWith('-');
+    return (
+      <div className="card">
+        <div className="stat-label">{tr.overview.jpHeadline}</div>
+        <div className="stat-value hero">{money(s.reported.miscellaneousIncome, cur)}</div>
+        <dl className="breakdown" style={{ maxWidth: 480 }}>
+          <dt>{tr.overview.revenue}</dt>
+          <dd>{money(s.reported.revenue, cur)}</dd>
+          <dt>{tr.overview.expenses}</dt>
+          <dd>−{money(s.reported.necessaryExpenses, cur)}</dd>
+          <dt className="total">{tr.overview.jpHeadline}</dt>
+          <dd className="total">{money(s.reported.miscellaneousIncome, cur)}</dd>
+        </dl>
+        <dl className="breakdown small" style={{ maxWidth: 480 }}>
+          <dt>{tr.overview.disposals}</dt>
+          <dd>{money(s.disposals.gain, cur, { sign: true })}</dd>
+          <dt>{tr.overview.income}</dt>
+          <dd>{money(s.incomeTotal, cur, { sign: true })}</dd>
+          <dt>{tr.overview.feeExpenses}</dt>
+          <dd>{isZero(s.expenses) ? money('0', cur) : `−${money(s.expenses, cur)}`}</dd>
+        </dl>
+        {negative ? (
+          <p className="notice warn small" style={{ marginTop: 12 }}>
+            {tr.overview.lossNote}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
   return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Asset</th>
-            <th>Account</th>
-            <th>Sold</th>
-            <th className="num">Proceeds</th>
-            <th className="num">Cost basis</th>
-            <th className="num">Gain</th>
-            <th>Term</th>
-            <th>Why this basis</th>
-          </tr>
-        </thead>
-        <tbody>
-          {result.disposals.map((d) => {
-            const lot = d.lotId ? lotsById.get(d.lotId) : undefined;
-            const why = d.basisShortfall
-              ? 'No history for these units — basis 0'
-              : lot
-                ? `Lot from ${lot.origin} (${lot.eventId ?? 'opening'}) on ${lot.acquiredAt.slice(0, 10)}${lot.parentLotId ? ', moved by transfer' : ''}`
-                : `${result.methods[d.asset]} average`;
-            return (
-              <tr key={d.id}>
-                <td>
-                  {d.quantity.toFixed()} {d.asset}
-                </td>
-                <td>{d.accountId}</td>
-                <td>{d.disposedAt.slice(0, 10)}</td>
-                <td className="num">{money(d.proceeds.minus(d.sellingCosts), pack)}</td>
-                <td className="num">{money(d.costBasis, pack)}</td>
-                <td className="num">{money(d.gain, pack)}</td>
-                <td>{d.term ?? '—'}</td>
-                <td className="muted">{why}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="grid">
+      <div className="card">
+        <div className="stat-label">{tr.overview.usShort}</div>
+        <div className="stat-value">{money(s.form8949Totals.partI.gain, cur)}</div>
+      </div>
+      <div className="card">
+        <div className="stat-label">{tr.overview.usLong}</div>
+        <div className="stat-value">{money(s.form8949Totals.partII.gain, cur)}</div>
+      </div>
+      <div className="card">
+        <div className="stat-label">{tr.overview.usIncome}</div>
+        <div className="stat-value">{money(s.reportedOrdinaryIncome, cur)}</div>
+      </div>
     </div>
   );
 }
 
-function FixQueue({ result, pack }: { result: CalculationResult; pack: RulePack }) {
-  if (result.issues.length === 0) return <p className="muted">Nothing to fix.</p>;
+function Uncertainty({ calc, lang }: { calc: Calculation; lang: Lang }) {
+  const tr = t(lang);
+  const known = calc.issues.filter((i) => i.impactKnown).map((i) => swing(i.impact));
+  const unknown = calc.issues.filter((i) => !i.impactKnown).length;
+  const total = sumDecimals(known);
   return (
-    <ol>
-      {result.issues.map((i) => {
-        const swing = i.impact.min.abs().greaterThan(i.impact.max.abs())
-          ? i.impact.min
-          : i.impact.max;
-        return (
-          <li key={i.id}>
-            <span className="warn">
-              {!i.impactKnown
-                ? 'Impact unknown'
-                : swing.isZero()
-                  ? 'Review'
-                  : `Up to ${money(swing.abs(), pack)}`}
-            </span>{' '}
-            — {i.message}
-            {i.suggestedResolution && (
-              <div className="muted">Suggested fix: {i.suggestedResolution.message}</div>
-            )}
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
-function Report({
-  title,
-  pack,
-  result,
-}: {
-  title: string;
-  pack: RulePack;
-  result: CalculationResult;
-}) {
-  const s = result.summary;
-  return (
-    <section>
-      <h2>{title}</h2>
-      <p className="muted">
-        Rule pack{' '}
-        <code>
-          {pack.id}@{pack.version}
-        </code>{' '}
-        ({pack.status}) · engine <code>{result.engineVersion}</code> · tax year {result.taxYear} ·{' '}
-        {result.timeZone}
-      </p>
-      {s.model === 'us_capital_gains' ? (
-        <p>
-          Short-term gain <strong>{money(s.shortTerm.gain, pack)}</strong> · Long-term gain{' '}
-          <strong>{money(s.longTerm.gain, pack)}</strong> · Ordinary income{' '}
-          <strong>{money(s.ordinaryIncome, pack)}</strong>
-        </p>
+    <div className="card">
+      <div className="stat-label">{tr.overview.uncertainty}</div>
+      {calc.issues.length === 0 ? (
+        <>
+          <div className="stat-value">±{money('0', calc.reportingCurrency)}</div>
+          <span className="badge good">{tr.overview.allClear}</span>
+        </>
       ) : (
-        <p>
-          雑所得 (miscellaneous income) <strong>{money(s.miscellaneousIncome, pack)}</strong> =
-          disposals {money(s.disposals.gain, pack)} + income {money(s.incomeTotal, pack)} − expenses{' '}
-          {money(s.expenses, pack)}
-        </p>
+        <>
+          <div className="stat-value">±{money(total, calc.reportingCurrency)}</div>
+          {unknown ? <span className="badge warn">{tr.overview.unknownCount(unknown)}</span> : null}
+          <p style={{ marginTop: 12 }}>
+            <Link href="/fixes">
+              {tr.nav.fixes} ({calc.issues.length}) →
+            </Link>
+          </p>
+        </>
       )}
-      <h3>Disposals</h3>
-      <Disposals result={result} pack={pack} />
-      <h3>Fix queue (largest impact first)</h3>
-      <FixQueue result={result} pack={pack} />
-    </section>
-  );
-}
-
-export default function Home() {
-  const usResult = calculate({ rulePack: us, taxYear: 2025, events: usEvents, prices: usPrices });
-  const jpResult = calculate({ rulePack: jp, taxYear: 2025, events: jpEvents });
-  return (
-    <main>
-      <h1>svdt-cloud</h1>
-      <p className="muted">
-        The crypto tax engine you can actually check. Demo data · rule packs are drafts pending
-        professional review · not tax advice.
-      </p>
-      <Report title="United States — 2025" pack={us} result={usResult} />
-      <Report title="Japan — 2025 (総平均法)" pack={jp} result={jpResult} />
-    </main>
+    </div>
   );
 }

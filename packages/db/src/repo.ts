@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { LedgerEvent } from '@svdt/domain';
-import { and, asc, eq, gt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, or, sql } from 'drizzle-orm';
 import type { Database, Tx } from './client';
 import { accounts, events, imports, overrides, rawBlobs, tenants, users } from './schema';
 
@@ -33,7 +33,7 @@ export async function createApiKey(
   if (!tenant) throw new Error(`No tenant "${tenantSlug}"`);
   const key = API_KEY_PREFIX + randomBytes(32).toString('base64url');
   await database.db.execute(
-    sql`insert into api_keys (tenant_id, name, key_hash) values (${tenant.id}, ${name}, ${hashApiKey(key)})`,
+    sql`insert into svdt.api_keys (tenant_id, name, key_hash) values (${tenant.id}, ${name}, ${hashApiKey(key)})`,
   );
   return { key, tenantId: tenant.id };
 }
@@ -54,7 +54,7 @@ export async function createTenant(
 export async function authenticate(tx: Tx, key: string): Promise<Caller | null> {
   if (!key.startsWith(API_KEY_PREFIX)) return null;
   const result = (await tx.execute(
-    sql`select tenant_id, key_name from svdt_authenticate(${hashApiKey(key)})`,
+    sql`select tenant_id, key_name from svdt.authenticate(${hashApiKey(key)})`,
   )) as unknown as { rows: { tenant_id: string; key_name: string }[] };
   const row = result.rows[0];
   return row ? { tenantId: row.tenant_id, keyName: row.key_name } : null;
@@ -92,7 +92,7 @@ export async function getUser(tx: Tx, tenantId: string, userId: string): Promise
 /** Deletes the user and every layer of their data. Returns false if there was no such user. */
 export async function purgeUser(tx: Tx, userId: string): Promise<boolean> {
   const result = (await tx.execute(
-    sql`select svdt_purge_user(${userId}) as purged`,
+    sql`select svdt.purge_user(${userId}) as purged`,
   )) as unknown as {
     rows: { purged: boolean }[];
   };
@@ -264,6 +264,66 @@ export async function eventExists(
     .from(events)
     .where(and(eq(events.tenantId, tenantId), eq(events.userId, userId), eq(events.id, eventId)));
   return row !== undefined;
+}
+
+/**
+ * Whether `eventId` names something an override can target: a stored event, or a transfer
+ * the matcher builds from two stored events (`transfer:<withdrawal>><deposit>`). If a later
+ * import breaks that match, the override is reported as orphaned, never dropped.
+ */
+export async function overrideTargetExists(
+  tx: Tx,
+  tenantId: string,
+  userId: string,
+  eventId: string,
+): Promise<boolean> {
+  if (!eventId.startsWith(TRANSFER_PREFIX)) return eventExists(tx, tenantId, userId, eventId);
+  const rest = eventId.slice(TRANSFER_PREFIX.length);
+  for (let i = rest.indexOf('>'); i > 0; i = rest.indexOf('>', i + 1)) {
+    const [w, d] = [rest.slice(0, i), rest.slice(i + 1)];
+    if (
+      (await eventExists(tx, tenantId, userId, w)) &&
+      (await eventExists(tx, tenantId, userId, d))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const TRANSFER_PREFIX = 'transfer:';
+
+export interface ImportRow {
+  id: string;
+  accountName: string;
+  filename: string | null;
+  importerId: string;
+  stats: { rows: number; imported: number; skipped: number };
+  warningCount: number;
+  createdAt: string;
+}
+
+/** Newest first. */
+export async function listImports(tx: Tx, tenantId: string, userId: string): Promise<ImportRow[]> {
+  const rows = await tx
+    .select({
+      id: imports.id,
+      accountName: imports.accountName,
+      filename: imports.filename,
+      importerId: imports.importerId,
+      stats: imports.stats,
+      warnings: imports.warnings,
+      createdAt: imports.createdAt,
+    })
+    .from(imports)
+    .where(and(eq(imports.tenantId, tenantId), eq(imports.userId, userId)))
+    .orderBy(desc(imports.createdAt), desc(imports.id));
+  return rows.map(({ warnings, stats, createdAt, ...r }) => ({
+    ...r,
+    stats: stats as ImportRow['stats'],
+    warningCount: Array.isArray(warnings) ? warnings.length : 0,
+    createdAt: createdAt.toISOString(),
+  }));
 }
 
 /** The user's whole normalized ledger, for a calculation. */

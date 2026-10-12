@@ -155,6 +155,7 @@ type Issue = {
 
   Ties break by tax year, then id.
 - **Trade fees paid in crypto** are applied after the trade's acquisition, so a fee charged in the asset just received comes out of those units.
+- **A fee paid in one of the trade's own assets** (e.g. bitFlyer charging BTC on a BTC purchase) is valued at the trade's own price when the fee states no value and no quote applies. It is the same instant and market, so no missing-price issue is raised.
 - **Missing prices** are valued at 0 in every reported figure. For ranking only, impact is estimated from the nearest quote at any distance in time, or from the stated value via the nearest FX quote:
   - unpriced proceeds or taxable income: `{0, estimate}`;
   - unpriced purchase in another fiat (missing basis lowers later gains): `{−estimate, 0}`;

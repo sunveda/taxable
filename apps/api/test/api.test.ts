@@ -194,6 +194,32 @@ describe('import → fix queue → override → recalculate', () => {
       },
     ]);
     expect(body.issues.map((i) => i.kind)).not.toContain('unmatched_withdrawal');
+
+    // The matched transfer is a valid override target; a made-up one is not.
+    const transferId = 'transfer:canonical:coinbase:w1>canonical:ledger:d1';
+    const price = { type: 'set_unit_price', asset: 'BTC', unitPrice: '50000' };
+    expect(
+      (
+        await call('POST', `/v1/users/${userId}/overrides`, {
+          json: { eventId: transferId, action: price },
+        })
+      ).status,
+    ).toBe(201);
+    expect(
+      (
+        await call('POST', `/v1/users/${userId}/overrides`, {
+          json: { eventId: 'transfer:canonical:coinbase:w1>nope', action: price },
+        })
+      ).status,
+    ).toBe(422);
+
+    const imports = (await (await call('GET', `/v1/users/${userId}/imports`)).json()) as {
+      data: { accountName: string; stats: { imported: number } }[];
+    };
+    expect(imports.data.map((i) => [i.accountName, i.stats.imported])).toEqual([
+      ['ledger', 1],
+      ['coinbase', 2],
+    ]);
   });
 });
 

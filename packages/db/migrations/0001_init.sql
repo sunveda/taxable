@@ -3,6 +3,10 @@
 -- The API never queries as the owner: every request runs in a transaction that sets
 -- `svdt.tenant_id` and switches to the `svdt_app` role, which row-level security confines
 -- to that tenant. Tenant ids lead every key so tables can later be partitioned by tenant.
+--
+-- Everything lives in its own `svdt` schema, not `public`. Hosted Postgres products expose
+-- `public` through auto-generated web APIs (e.g. Supabase's Data API) and may grant their
+-- own roles on it by default; the end of this file removes any such access to `svdt`.
 
 DO $$
 BEGIN
@@ -13,7 +17,10 @@ END
 $$;
 GRANT svdt_app TO CURRENT_USER;
 
-CREATE FUNCTION svdt_current_tenant() RETURNS uuid
+CREATE SCHEMA IF NOT EXISTS svdt;
+SET LOCAL search_path TO svdt;
+
+CREATE FUNCTION current_tenant() RETURNS uuid
   LANGUAGE sql STABLE
   AS $$ SELECT nullif(current_setting('svdt.tenant_id', true), '')::uuid $$;
 
@@ -26,7 +33,8 @@ CREATE TABLE tenants (
 -- Built-in tenant for consumer (B2C) users (ADR-0011).
 INSERT INTO tenants (slug, name) VALUES ('direct', 'Direct');
 
--- Partner/app API keys. Only a SHA-256 hash is stored. Not visible to svdt_app.
+-- Partner/app API keys. Only a SHA-256 hash is stored. No role but the owner can read it
+-- (RLS on with no policy); authentication goes through svdt.authenticate().
 CREATE TABLE api_keys (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id  uuid NOT NULL REFERENCES tenants (id) ON DELETE CASCADE,
@@ -125,8 +133,9 @@ CREATE TABLE overrides (
 CREATE INDEX overrides_in_order ON overrides (tenant_id, user_id, seq);
 
 -- Row-level security: svdt_app sees only the current tenant's rows.
+ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON tenants USING (id = svdt_current_tenant());
+CREATE POLICY tenant_isolation ON tenants USING (id = current_tenant());
 
 DO $$
 DECLARE t text;
@@ -135,38 +144,38 @@ BEGIN
   LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format(
-      'CREATE POLICY tenant_isolation ON %I USING (tenant_id = svdt_current_tenant()) '
-      'WITH CHECK (tenant_id = svdt_current_tenant())', t);
+      'CREATE POLICY tenant_isolation ON %I USING (tenant_id = current_tenant()) '
+      'WITH CHECK (tenant_id = current_tenant())', t);
   END LOOP;
 END
 $$;
 
 -- Least privilege. Raw and override layers are append-only for the app; events are
--- updatable because re-normalization rewrites them. Deletion goes through svdt_purge_user.
-GRANT USAGE ON SCHEMA public TO svdt_app;
+-- updatable because re-normalization rewrites them. Deletion goes through purge_user().
+GRANT USAGE ON SCHEMA svdt TO svdt_app;
 GRANT SELECT ON tenants TO svdt_app;
 GRANT SELECT, INSERT, UPDATE ON users, accounts, events TO svdt_app;
 GRANT SELECT, INSERT ON raw_blobs, imports, overrides TO svdt_app;
 
 -- API key lookup happens before a tenant is known, so it runs with the owner's rights and
 -- returns only what authentication needs.
-CREATE FUNCTION svdt_authenticate(p_key_hash text)
+CREATE FUNCTION authenticate(p_key_hash text)
   RETURNS TABLE (key_id uuid, tenant_id uuid, key_name text)
-  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = svdt
   AS $$
     SELECT k.id, k.tenant_id, k.name FROM api_keys k
     WHERE k.key_hash = p_key_hash AND k.revoked_at IS NULL
   $$;
 
 -- Deleting a user purges every layer (security spec). Scoped to the caller's tenant.
-CREATE FUNCTION svdt_purge_user(p_user uuid) RETURNS boolean
-  LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+CREATE FUNCTION purge_user(p_user uuid) RETURNS boolean
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = svdt
   AS $$
   DECLARE
-    t uuid := svdt_current_tenant();
+    t uuid := current_tenant();
   BEGIN
     IF t IS NULL THEN
-      RAISE EXCEPTION 'svdt_purge_user: no tenant context';
+      RAISE EXCEPTION 'purge_user: no tenant context';
     END IF;
     IF NOT EXISTS (SELECT 1 FROM users WHERE tenant_id = t AND id = p_user) THEN
       RETURN false;
@@ -183,6 +192,26 @@ CREATE FUNCTION svdt_purge_user(p_user uuid) RETURNS boolean
   END
   $$;
 
-REVOKE ALL ON FUNCTION svdt_authenticate(text), svdt_purge_user(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION svdt_authenticate(text), svdt_purge_user(uuid), svdt_current_tenant()
-  TO svdt_app;
+-- Postgres lets PUBLIC execute every new function; only svdt_app may call ours.
+REVOKE ALL ON SCHEMA svdt FROM PUBLIC;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA svdt FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES IN SCHEMA svdt REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION authenticate(text), purge_user(uuid), current_tenant() TO svdt_app;
+
+-- Hosted platforms' own roles (Supabase: anon, authenticated, service_role) get nothing here,
+-- even if the platform's default privileges granted them access as objects were created.
+-- Later migrations that add objects must end with the same block; test/db.test.ts checks.
+DO $$
+DECLARE r text;
+BEGIN
+  FOREACH r IN ARRAY ARRAY['anon', 'authenticated', 'service_role']
+  LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+      EXECUTE format('REVOKE ALL ON SCHEMA svdt FROM %I', r);
+      EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA svdt FROM %I', r);
+      EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA svdt FROM %I', r);
+      EXECUTE format('REVOKE ALL ON ALL FUNCTIONS IN SCHEMA svdt FROM %I', r);
+    END IF;
+  END LOOP;
+END
+$$;

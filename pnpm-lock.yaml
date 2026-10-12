@@ -78,6 +78,9 @@ importers:
       '@svdt/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@svdt/importers':
+        specifier: workspace:*
+        version: link:../../packages/importers
       '@svdt/rule-packs':
         specifier: workspace:*
         version: link:../../packages/rule-packs

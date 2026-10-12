@@ -3,11 +3,12 @@ import {
   addOverride,
   authenticate,
   createUser,
-  eventExists,
   getUser,
   listEvents,
+  listImports,
   listOverrides,
   loadLedger,
+  overrideTargetExists,
   purgeUser,
   saveImport,
   withoutTenant,
@@ -35,6 +36,7 @@ import {
   EventPageSchema,
   EventsQuery,
   ImportQuery,
+  ImportListSchema,
   ImportSchema,
   OkSchema,
   OverrideListSchema,
@@ -255,6 +257,31 @@ export function createApp(database: Database) {
   app.openapi(
     createRoute({
       method: 'get',
+      path: '/v1/users/{userId}/imports',
+      security,
+      description: 'Every file imported for the user, newest first.',
+      request: { params: UserIdParams },
+      responses: {
+        200: ok(ImportListSchema, 'Imports'),
+        401: err('Missing or invalid API key'),
+        404: err('No such user'),
+      },
+    }),
+    async (c) => {
+      const { userId } = c.req.valid('param');
+      const { tenantId } = c.var.caller;
+      const rows = await tenant(c, async (tx) => {
+        if (!(await getUser(tx, tenantId, userId))) return null;
+        return listImports(tx, tenantId, userId);
+      });
+      if (!rows) return c.json(noUser, 404);
+      return c.json({ data: rows }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'get',
       path: '/v1/users/{userId}/events',
       security,
       description: 'Normalized ledger events, oldest first.',
@@ -296,7 +323,8 @@ export function createApp(database: Database) {
       security,
       description:
         'Records a correction (ADR-0009). Overrides are append-only: to undo one, add a ' +
-        '`revoke`. A suggested resolution from a calculation can be posted as-is.',
+        '`revoke`. A suggested resolution from a calculation can be posted as-is. `eventId` ' +
+        'is a stored event or a matched transfer (`transfer:<withdrawal>><deposit>`).',
       request: {
         params: UserIdParams,
         body: { content: { 'application/json': { schema: CreateOverrideBody } } },
@@ -315,7 +343,9 @@ export function createApp(database: Database) {
       const { tenantId, keyName } = c.var.caller;
       const result = await tenant(c, async (tx) => {
         if (!(await getUser(tx, tenantId, userId))) return 'no_user' as const;
-        if (!(await eventExists(tx, tenantId, userId, body.eventId))) return 'no_event' as const;
+        if (!(await overrideTargetExists(tx, tenantId, userId, body.eventId))) {
+          return 'no_event' as const;
+        }
         return addOverride(tx, {
           tenantId,
           userId,

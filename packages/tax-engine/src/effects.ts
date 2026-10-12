@@ -236,6 +236,27 @@ function feeEffects(
   return out;
 }
 
+/**
+ * A fee paid in one of the trade's own assets (e.g. bitFlyer charging BTC on a BTC buy) is
+ * valued at the trade's own price when nothing better values it. Same instant, same
+ * market: more accurate than any external quote.
+ */
+function impliedFeeValue(
+  ctx: EffectContext,
+  fee: AssetAmount,
+  at: Timestamp,
+  sent: AssetAmount,
+  received: AssetAmount,
+  tradeValue: Decimal,
+): Decimal | null {
+  if (ctx.valuer.value(fee, at)) return null;
+  const side = fee.asset === received.asset ? received : fee.asset === sent.asset ? sent : null;
+  if (!side) return null;
+  const sideQty = dec(side.quantity);
+  if (sideQty.isZero()) return null;
+  return tradeValue.times(dec(fee.quantity)).dividedBy(sideQty);
+}
+
 export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
   const out: Effect[] = [];
   const at = e.timestamp;
@@ -267,7 +288,12 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
 
       let fee: { value: Decimal; known: boolean } = { value: ZERO, known: true };
       if (e.fee && !dec(e.fee.quantity).isZero()) {
-        fee = valueOrIssue(ctx, e.fee, at, e.id, out, 'either');
+        const implied = tradeKnown
+          ? impliedFeeValue(ctx, e.fee, at, e.sent, e.received, tradeValue)
+          : null;
+        fee = implied
+          ? { value: implied, known: true }
+          : valueOrIssue(ctx, e.fee, at, e.id, out, 'either');
       }
       const feeValue = fee.value;
 

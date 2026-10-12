@@ -65,6 +65,7 @@ export async function withTenant<T>(
   return database.db.transaction(async (tx) => {
     await tx.execute(sql`select set_config('svdt.tenant_id', ${tenantId}, true)`);
     await tx.execute(sql`set local role svdt_app`);
+    await tx.execute(sql`set local search_path to svdt`);
     return fn(tx);
   });
 }
@@ -73,6 +74,7 @@ export async function withTenant<T>(
 export async function withoutTenant<T>(database: Database, fn: (tx: Tx) => Promise<T>): Promise<T> {
   return database.db.transaction(async (tx) => {
     await tx.execute(sql`set local role svdt_app`);
+    await tx.execute(sql`set local search_path to svdt`);
     return fn(tx);
   });
 }
