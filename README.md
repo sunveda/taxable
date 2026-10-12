@@ -1,0 +1,98 @@
+# svdt-cloud
+
+**The crypto tax engine you can actually check.**
+
+svdt-cloud computes crypto capital gains and income, **explains every number** back to the
+transaction that caused it, and **ranks the fixes that actually change your tax bill**.
+One engine serves:
+
+- **Consumers:** web app first; iOS and Android later.
+- **Platforms:** exchanges, brokers, and wallets, via a Tax API, an embeddable tax center, and 1099-DA / DAC8 / CARF reporting.
+
+Launch jurisdictions: **United States** and **Japan**
+([ADR-0013](./docs/adr/0013-launch-jurisdiction.md), [ADR-0015](./docs/adr/0015-japan-second-jurisdiction.md)).
+
+## Start here
+
+1. [Gap analysis](./docs/research/gap-analysis.md): why this product, and where incumbents fall short
+2. [Product spec](./docs/spec/product-spec.md): what we're building, and in which phase
+3. [Tax engine spec](./docs/spec/tax-engine-spec.md): how the numbers are computed; §13 shows what's implemented
+4. [Architecture diagrams](./docs/architecture/README.md): context, components, and flows
+5. [ADR index](./docs/adr/README.md): key technical decisions
+
+## Repository layout
+
+See [ADR-0002](./docs/adr/0002-monorepo-structure.md) and [ADR-0016](./docs/adr/0016-tooling-baseline.md).
+
+```
+apps/
+  web/          Next.js app (Japanese/English): overview, import, transactions, fix queue, report
+  api/          HTTP API (Hono, OpenAPI 3.1): imports, events, overrides, calculations
+  mobile/       reserved for the Expo iOS/Android app
+packages/
+  domain/       shared types: ledger events, Decimal, time zones
+  rule-packs/   jurisdiction rules as cited data: us, jp
+  importers/    CSV importers (Coinbase, Kraken, bitFlyer, Coincheck, canonical) + transfer matching
+  tax-engine/   pure, deterministic calculation engine + golden and property tests
+  db/           Postgres schema, SQL migrations, row-level security, data access
+  config/       shared tsconfig
+docs/           research · spec · adr
+```
+
+## Development
+
+Requires Node 22 and pnpm 10 (`corepack enable`).
+
+```sh
+pnpm install
+pnpm test        # unit, golden-scenario and property tests
+pnpm lint        # includes platform-neutral/determinism guardrails for shared packages
+pnpm typecheck
+pnpm build
+pnpm --filter @svdt/web dev   # http://localhost:3000
+```
+
+### Web app
+
+`pnpm --filter @svdt/web dev` runs the app. Without configuration it uses a built-in placeholder
+backend (in-memory, seeded with Japanese sample data) so every screen works. To use the real API,
+set `SVDT_API_URL`, `SVDT_API_KEY` and `SVDT_USER_ID` (the app acts as that one user until session
+login exists).
+
+### Deployment (Vercel, Tokyo)
+
+| Project            | Root       | Serves                                                                                            |
+| ------------------ | ---------- | ------------------------------------------------------------------------------------------------- |
+| `svdt-taxable`     | `apps/web` | the web app, functions in `hnd1` (`apps/web/vercel.json`)                                         |
+| `svdt-taxable-api` | `apps/api` | https://svdt-taxable-api.vercel.app, one function in `hnd1` (`apps/api/scripts/build-vercel.mjs`) |
+
+The database is Supabase in Tokyo (Vercel Marketplace), connected to `svdt-taxable-api`, which gets
+`POSTGRES_URL` from the integration and `DATABASE_CA_CERT` (Supabase Root 2021 CA). Migrations are an
+operator step, run against `POSTGRES_URL_NON_POOLING`. The web project has `SVDT_API_URL`,
+`SVDT_API_KEY` (sensitive) and `SVDT_USER_ID`.
+
+### API
+
+Without `DATABASE_URL`, the API uses an embedded Postgres (PGlite) in `apps/api/.data/`, so no
+database server is needed locally. Tests use an in-memory one.
+
+```sh
+pnpm --filter @svdt/api create-key -- --name local   # prints an API key once
+pnpm --filter @svdt/api dev                          # http://localhost:8787/v1/openapi.json
+```
+
+With `DATABASE_URL=postgres://…`, run `pnpm --filter @svdt/api migrate` first. For a database signed by
+its own CA (Supabase), also set `DATABASE_CA_CERT` to the CA's PEM text. Then, for example:
+
+```sh
+curl -X POST localhost:8787/v1/users -H "authorization: Bearer $KEY" -H 'content-type: application/json' -d '{}'
+curl -X POST "localhost:8787/v1/users/$USER/imports?account=coinbase" -H "authorization: Bearer $KEY" \
+  -H 'content-type: text/csv' --data-binary @export.csv
+curl -X POST localhost:8787/v1/users/$USER/calculations -H "authorization: Bearer $KEY" \
+  -H 'content-type: application/json' -d '{"jurisdiction":"us","taxYear":2025}'
+```
+
+## Disclaimer
+
+Nothing in this repository is tax or legal advice. Every rule in `packages/rule-packs` is
+marked `draft` until reviewed by a qualified tax professional for that jurisdiction.
