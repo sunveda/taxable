@@ -16,6 +16,7 @@ export default tseslint.config(
       '**/.next/**',
       '**/dist/**',
       '**/.turbo/**',
+      '**/.vercel/**',
       '**/next-env.d.ts',
     ],
   },
@@ -28,6 +29,13 @@ export default tseslint.config(
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
       '@typescript-eslint/consistent-type-imports': 'error',
+    },
+  },
+  {
+    // Node build scripts.
+    files: ['**/scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { URL: 'readonly', console: 'readonly', process: 'readonly' },
     },
   },
   {

@@ -8,7 +8,7 @@ import { databaseUrl } from './env';
  * PGlite database under `.data/` and migrations run on start.
  */
 const { url, local } = databaseUrl();
-const database = createDatabase(url);
+const database = await createDatabase(url);
 if (local) await migrate(database);
 
 const port = Number(process.env['PORT'] ?? 8787);

@@ -46,7 +46,7 @@ let tenantA: string;
 let tenantB: string;
 
 beforeAll(async () => {
-  database = createDatabase();
+  database = await createDatabase();
   await migrate(database);
   tenantA = await createTenant(database, 'a', 'Tenant A');
   tenantB = await createTenant(database, 'b', 'Tenant B');
@@ -289,7 +289,7 @@ describe('hosted-platform roles (e.g. Supabase anon/authenticated/service_role)'
   it('get no access to anything we create, even with permissive default privileges', async () => {
     // A fresh database set up like the most permissive hosted platform: its roles exist and
     // are granted everything created from now on, in every schema.
-    const hosted = createDatabase();
+    const hosted = await createDatabase();
     try {
       await hosted.exec(
         ROLES.map((r) => `CREATE ROLE ${r} NOLOGIN;`).join('\n') +

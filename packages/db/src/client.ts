@@ -1,5 +1,3 @@
-import { PGlite } from '@electric-sql/pglite';
-import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
 import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
 import { sql } from 'drizzle-orm';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
@@ -18,10 +16,11 @@ export interface Database {
 }
 
 /**
- * `postgres://…` / `postgresql://…` connects to Postgres (e.g. Neon via Vercel).
- * Anything else is a PGlite data directory; omitted means in-memory (tests).
+ * `postgres://…` / `postgresql://…` connects to Postgres (Supabase in production).
+ * Anything else is a PGlite data directory; omitted means in-memory (tests). PGlite is
+ * loaded only when used, so a production bundle needn't include it.
  */
-export function createDatabase(url?: string): Database {
+export async function createDatabase(url?: string): Promise<Database> {
   if (url && /^postgres(ql)?:\/\//.test(url)) {
     const pool = new pg.Pool({ connectionString: url, max: 5 });
     return {
@@ -42,11 +41,17 @@ export function createDatabase(url?: string): Database {
       close: () => pool.end(),
     };
   }
+  const [{ PGlite }, { drizzle: drizzlePglite }] = await Promise.all([
+    import('@electric-sql/pglite'),
+    import('drizzle-orm/pglite'),
+  ]);
   const client = new PGlite(url);
   return {
     db: drizzlePglite(client, { schema }) as unknown as Db,
     exec: async (script) => {
-      await client.exec(script);
+      await client.transaction(async (tx) => {
+        await tx.exec(script);
+      });
     },
     close: () => client.close(),
   };

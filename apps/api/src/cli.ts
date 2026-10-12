@@ -12,7 +12,7 @@ const flag = (name: string): string | undefined => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 
-const database = createDatabase(databaseUrl().url);
+const database = await createDatabase(databaseUrl().url);
 try {
   if (command === 'migrate') {
     const applied = await migrate(database);

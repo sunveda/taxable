@@ -9,7 +9,7 @@ let keyA: string;
 let keyB: string;
 
 beforeAll(async () => {
-  database = createDatabase();
+  database = await createDatabase();
   await migrate(database);
   await createTenant(database, 'partner-b', 'Partner B');
   keyA = (await createApiKey(database, 'direct', 'test-a')).key;
