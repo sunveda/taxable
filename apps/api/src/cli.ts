@@ -12,7 +12,8 @@ const flag = (name: string): string | undefined => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 
-const database = await createDatabase(databaseUrl().url);
+const { url, caCert } = databaseUrl();
+const database = await createDatabase(url, caCert ? { caCert } : {});
 try {
   if (command === 'migrate') {
     const applied = await migrate(database);

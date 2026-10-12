@@ -7,8 +7,8 @@ import { databaseUrl } from './env';
  * Local server. `DATABASE_URL` points at Postgres; without it, data lives in an embedded
  * PGlite database under `.data/` and migrations run on start.
  */
-const { url, local } = databaseUrl();
-const database = await createDatabase(url);
+const { url, local, caCert } = databaseUrl();
+const database = await createDatabase(url, caCert ? { caCert } : {});
 if (local) await migrate(database);
 
 const port = Number(process.env['PORT'] ?? 8787);

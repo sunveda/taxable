@@ -20,9 +20,12 @@ export interface Database {
  * Anything else is a PGlite data directory; omitted means in-memory (tests). PGlite is
  * loaded only when used, so a production bundle needn't include it.
  */
-export async function createDatabase(url?: string): Promise<Database> {
+export async function createDatabase(
+  url?: string,
+  opts: { caCert?: string } = {},
+): Promise<Database> {
   if (url && /^postgres(ql)?:\/\//.test(url)) {
-    const pool = new pg.Pool({ connectionString: url, max: 5 });
+    const pool = new pg.Pool({ ...connection(url, opts.caCert), max: 5 });
     return {
       db: drizzlePg(pool, { schema }) as unknown as Db,
       exec: async (script) => {
@@ -55,6 +58,19 @@ export async function createDatabase(url?: string): Promise<Database> {
     },
     close: () => client.close(),
   };
+}
+
+/**
+ * With a CA certificate (PEM), TLS is verified against it and the server's hostname
+ * (libpq `verify-full`). Hosted Postgres often signs with its own CA (Supabase:
+ * `prod-ca-2021.crt`), which Node doesn't trust by default. The URL's `sslmode` is dropped
+ * in that case: node-postgres lets it override the explicit TLS settings.
+ */
+function connection(url: string, caCert: string | undefined): pg.PoolConfig {
+  if (!caCert) return { connectionString: url };
+  const u = new URL(url);
+  u.searchParams.delete('sslmode');
+  return { connectionString: u.toString(), ssl: { ca: caCert, rejectUnauthorized: true } };
 }
 
 /**
