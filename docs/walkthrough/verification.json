@@ -1,0 +1,30 @@
+{
+  "duration": 352.97168,
+  "width": 1920,
+  "height": 1080,
+  "playedSeconds": 1.158751,
+  "decodedFrames": 375,
+  "error": null,
+  "seeks": [
+    {
+      "requested": 176.48584,
+      "actual": 176.48584,
+      "readyState": 4
+    },
+    {
+      "requested": 350.97168,
+      "actual": 350.97168,
+      "readyState": 4
+    }
+  ],
+  "sha256": "77b3330805e5658894c0ea1e386cfd34c77df5468dd13bffff8495394a7c3d34",
+  "sizeBytes": 7145094,
+  "fullVideoAudioDecode": "passed; ffmpeg reported no errors",
+  "audioMeanVolumeDb": -19.5,
+  "audioMaxVolumeDb": -0.8,
+  "videoCodec": "H.264",
+  "audioCodec": "AAC",
+  "subtitleCodec": "mov_text",
+  "data": "synthetic only",
+  "nativeDeviceCapture": false
+}

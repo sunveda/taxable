@@ -1,0 +1,20 @@
+{
+  "baseCommit": "5ee8edc08be110c6869546ef8db55163c75396b5",
+  "sourceStatus": "uncommitted local implementation; not deployed or published by this documentation commit",
+  "files": {
+    "apps/mobile/App.tsx": "8628d0b7d47c6d142b5362e62f66c8cdac873fbd1eab5729e3581cf31aa60f14",
+    "apps/mobile/src/controller.ts": "a10f2c0be484dc1411dbd33ab31c2109428a90485da3680cde5bf15be82333e7",
+    "apps/mobile/src/corrections.ts": "29e4b93f323110a50827dbff81d3e99b42a17cace3ea80596843389c79e0159e",
+    "apps/mobile/src/ManualCorrection.tsx": "948f7b38313f44ec28608130c47295d98b2be994912966d16b4783aa869433fa",
+    "apps/mobile/src/ReportDetails.tsx": "e44748184c90a5e6acd93f2344d2b0230a7df5aa0437889fa136fc91f47fd9d3",
+    "apps/mobile/src/storage.ts": "12a8566dede607e6f063a7163ee937bd0c1ae210144f732a601b4a9ebd94c581",
+    "apps/web/app/layout.tsx": "8ea976693c3dd8e64fdc8f5c9472764ec09cf76be5f15f64689c7f0628afb9c9",
+    "apps/web/app/auth-actions.ts": "a794699a78fc8d3b7058d1799b6bb482dbc3d44760a0552992e52748d32c3628",
+    "apps/web/app/actions.ts": "39c5d7a03f09d2bf49a89f702d5edf51dbca08573191d980d05858078f1da7a1",
+    "apps/web/lib/backend.ts": "51287158eb1d4b82f728965c67004a25946668be8b07a21cda4467b0d8344974",
+    "apps/web/lib/auth.ts": "b247b61db267869086fe1a0120089074bb19e39c3d241348cf50d3819c41d1db",
+    "apps/api/src/app.ts": "9dc58c768c6886908066e2450336223459596a4395ff3b077403405340a42255",
+    "packages/api-client/src/client.ts": "86318625b08ee41c258451ed9699148e75ad5245bdcbd58e720d745815988201",
+    "packages/db/src/sessions.ts": "96399cb29dbae4e9538be8749b3da257b8e5e786c7629210f89de76f3e7a3477"
+  }
+}

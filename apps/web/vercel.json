@@ -1,4 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "regions": ["hnd1"]
+  "regions": [
+    "hnd1"
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "docs/taxable-walkthrough-20261103": false
+    }
+  }
 }
