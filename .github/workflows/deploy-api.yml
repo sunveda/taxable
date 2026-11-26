@@ -3,7 +3,8 @@ name: Deploy API (AWS Lambda)
 # Builds apps/api and uploads it to the Lambda function svdt-taxable-api.
 # Infrastructure (function, Function URL, roles) is Terraform in sunveda/iac, `taxable/`.
 # The job runs in the "production" environment, which only main can deploy to; only that
-# environment can assume the deploy role, which can do nothing but update this function's code.
+# environment can assume the deploy role, which can only update this function's code and
+# invoke it to run migrations.
 
 on:
   push:
@@ -59,6 +60,17 @@ jobs:
             --zip-file fileb://apps/api/lambda.zip \
             --query '{version: Version, sha256: CodeSha256}' --output table
           aws lambda wait function-updated-v2 --function-name "$FUNCTION_NAME"
+
+      # Applies pending SQL migrations as the API's database user. The first call after the
+      # database has paused waits for it to resume, hence the long read timeout.
+      - name: Migrate
+        run: |
+          aws lambda invoke --function-name "$FUNCTION_NAME" \
+            --cli-binary-format raw-in-base64-out --payload '{"svdt":"migrate"}' \
+            --cli-read-timeout 90 --query FunctionError --output text migrate.json > error.txt
+          cat migrate.json
+          echo
+          if [ "$(cat error.txt)" != "None" ]; then exit 1; fi
 
       - name: Smoke test
         run: |

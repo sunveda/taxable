@@ -1,42 +1,70 @@
-import { GetParametersCommand, SSMClient } from '@aws-sdk/client-ssm';
-import { createDatabase } from '@svdt/db';
-import { handle } from 'hono/aws-lambda';
+import { readFileSync } from 'node:fs';
+import { Signer } from '@aws-sdk/rds-signer';
+import { createApiKey, createDatabase, migrate } from '@svdt/db';
+import { handle, type LambdaContext, type LambdaEvent } from 'hono/aws-lambda';
 import { createApp } from './app';
-import { databaseUrl } from './env';
 
 /**
  * AWS Lambda entry (see scripts/build-lambda.mjs), served through a Function URL. The
- * infrastructure is Terraform in sunveda/iac (`taxable/`).
+ * infrastructure is Terraform in sunveda/iac (`taxable/`): Aurora PostgreSQL in a private
+ * VPC, reached only from this function.
  *
- * Secrets live in SSM Parameter Store under `SSM_PREFIX` (e.g. `/taxable/prod/DATABASE_URL`)
- * and are read once per cold start, so they never sit in the function's configuration.
- * Variables already set in the environment win, which keeps local runs simple.
+ * The function signs in as `DB_USER` with IAM database authentication: each new connection
+ * gets a 15-minute token signed with the function's own role, so no database password
+ * exists anywhere. TLS is verified against the Amazon RDS CA bundled next to this file.
  */
-const SECRETS = ['DATABASE_URL', 'DATABASE_CA_CERT'] as const;
+const env = (name: string): string => {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} must be set`);
+  return value;
+};
 
-async function loadSecrets(prefix: string | undefined): Promise<void> {
-  if (!prefix) return;
-  const { Parameters = [] } = await new SSMClient({}).send(
-    new GetParametersCommand({
-      Names: SECRETS.map((name) => `${prefix}/${name}`),
-      WithDecryption: true,
-    }),
+const host = env('DB_HOST');
+const user = env('DB_USER');
+const port = 5432;
+const signer = new Signer({ hostname: host, port, username: user });
+
+const database = await createDatabase(
+  `postgresql://${encodeURIComponent(user)}@${host}:${port}/${encodeURIComponent(env('DB_NAME'))}`,
+  {
+    caCert: readFileSync(new URL('./rds-ca.pem', import.meta.url), 'utf8'),
+    password: () => signer.getAuthToken(),
+  },
+);
+
+const http = handle(createApp(database));
+
+/**
+ * Operator actions, sent by invoking the function directly (`aws lambda invoke`), which
+ * needs IAM permission. Function URL requests always carry `requestContext`, so the public
+ * URL can't reach these.
+ *   {"svdt": "migrate"}                                  (run by the deploy workflow)
+ *   {"svdt": "create-key", "name": "web", "tenant": "direct"}  (the key is returned once)
+ */
+type AdminEvent = { svdt: 'migrate' } | { svdt: 'create-key'; name: string; tenant?: string };
+
+function isAdminEvent(event: unknown): event is AdminEvent {
+  return (
+    typeof event === 'object' &&
+    event !== null &&
+    !('requestContext' in event) &&
+    'svdt' in event &&
+    typeof (event as { svdt: unknown }).svdt === 'string'
   );
-  for (const { Name, Value } of Parameters) {
-    if (Name && Value !== undefined) process.env[Name.slice(prefix.length + 1)] ??= Value;
+}
+
+const migrations = new URL('./migrations/', import.meta.url);
+
+async function admin(event: AdminEvent): Promise<Record<string, unknown>> {
+  const applied = await migrate(database, migrations);
+  if (event.svdt === 'migrate') return { applied };
+  if (event.svdt === 'create-key') {
+    if (!event.name) throw new Error('create-key needs "name"');
+    const { key } = await createApiKey(database, event.tenant ?? 'direct', event.name);
+    return { applied, key };
   }
+  throw new Error(`Unknown action ${JSON.stringify((event as { svdt: unknown }).svdt)}`);
 }
 
-await loadSecrets(process.env['SSM_PREFIX']);
-
-// Production always uses Postgres; migrations are run by an operator, never on boot.
-// Check first: without a URL, databaseUrl() would try to create a local PGlite directory,
-// and the Lambda filesystem is read-only.
-if (!process.env['DATABASE_URL'] && !process.env['POSTGRES_URL']) {
-  throw new Error('DATABASE_URL must be set (SSM parameter or environment)');
-}
-const { url, local, caCert } = databaseUrl();
-if (local) throw new Error('DATABASE_URL must point at Postgres');
-const database = await createDatabase(url, caCert ? { caCert } : {});
-
-export const handler = handle(createApp(database));
+export const handler = async (event: unknown, context?: LambdaContext) =>
+  isAdminEvent(event) ? admin(event) : http(event as LambdaEvent, context);

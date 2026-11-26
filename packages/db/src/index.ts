@@ -2,6 +2,7 @@ export {
   createDatabase,
   withTenant,
   withoutTenant,
+  type ConnectionOptions,
   type Database,
   type Db,
   type Tx,
