@@ -17,7 +17,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-ssm": "3.1178.0",
+    "@aws-sdk/client-secrets-manager": "3.1178.0",
+    "@aws-sdk/rds-signer": "3.1178.0",
     "@hono/node-server": "2.1.11",
     "@hono/zod-openapi": "1.6.3",
     "@svdt/db": "workspace:*",

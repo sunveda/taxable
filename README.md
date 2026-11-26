@@ -71,19 +71,31 @@ The database is Supabase in Tokyo (Vercel Marketplace), connected to `svdt-taxab
 operator step, run against `POSTGRES_URL_NON_POOLING`. The web project has `SVDT_API_URL`,
 `SVDT_API_KEY` (sensitive) and `SVDT_USER_ID`.
 
-### Deployment (AWS Lambda, API; migration in progress)
+### Deployment (AWS Lambda + RDS for PostgreSQL, API; migration in progress)
 
-The API is moving to the Lambda function `svdt-taxable-api`, behind a Function URL. The infrastructure
-is Terraform in [`sunveda/iac`](https://github.com/sunveda/iac) (`taxable/`). It runs in Sydney
-(`ap-southeast-2`) for now, because the AWS account's free plan only allows its home Region.
+The API is moving to the Lambda function `svdt-taxable-api`, behind a Function URL, with RDS for
+PostgreSQL as its database. The infrastructure is Terraform in
+[`sunveda/iac`](https://github.com/sunveda/iac) (`taxable/`). Both run in Sydney (`ap-southeast-2`)
+for now, because the AWS account's free plan only allows its home Region.
 
-- **Build:** `pnpm --filter @svdt/api build:lambda` bundles `src/lambda.ts` into `apps/api/.lambda/`.
+- **Build:** `pnpm --filter @svdt/api build:lambda` bundles `src/lambda.ts` into `apps/api/.lambda/`,
+  with the SQL migrations and the Amazon RDS CA (`apps/api/certs/`).
 - **Deploy:** `.github/workflows/deploy-api.yml` runs on pushes to `main` that touch the API, or by
-  hand. It runs in the GitHub `production` environment, uploads the bundle, then checks `/v1/health`.
-- **Secrets:** SSM Parameter Store SecureStrings, read at cold start. They are created by hand, never
-  in Terraform or this repo:
-  - `/taxable/prod/DATABASE_URL`: Supabase's pooled connection string.
-  - `/taxable/prod/DATABASE_CA_CERT`: PEM text of the Supabase CA.
+  hand. It runs in the GitHub `production` environment, uploads the bundle, runs migrations, then
+  checks `/v1/health`.
+- **Database access:** the database has no public endpoint; only the Lambda (in the same VPC) can
+  reach it. The API signs in as `svdt_api` with IAM database authentication, so there is no
+  database password to store. TLS is verified against the bundled RDS CA.
+- **Operator actions:** invoke the function directly (needs IAM permission; the public URL can't):
+
+  ```sh
+  aws lambda invoke --function-name svdt-taxable-api --cli-binary-format raw-in-base64-out \
+    --payload '{"svdt":"bootstrap"}' out.json   # once per new database (see sunveda/iac README)
+  aws lambda invoke --function-name svdt-taxable-api --cli-binary-format raw-in-base64-out \
+    --payload '{"svdt":"migrate"}' out.json
+  aws lambda invoke --function-name svdt-taxable-api --cli-binary-format raw-in-base64-out \
+    --payload '{"svdt":"create-key","name":"web"}' out.json   # API key, shown once
+  ```
 
 ### API
 
