@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "node scripts/build-vercel.mjs",
+    "build:lambda": "node scripts/build-lambda.mjs",
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "migrate": "tsx src/cli.ts migrate",
@@ -16,6 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-ssm": "3.1178.0",
     "@hono/node-server": "2.1.4",
     "@hono/zod-openapi": "1.6.3",
     "@svdt/db": "workspace:*",
