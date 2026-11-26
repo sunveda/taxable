@@ -83,6 +83,12 @@ Each event gets a **taxable meaning** from a closed set:
 - Unmatched outgoing transfers create an issue. The **default** suggestion is "transfer to
   external wallet you own (not imported)", because that is not a disposal. The issue's impact
   is the gain that would arise if it were a disposal.
+- Coins treated as sent to the user's own wallet keep their basis: they move to a virtual
+  "unconnected own wallets" account (`UNCONNECTED_WALLETS`). With per-user pools (Japan) they
+  keep counting in the average cost. A later external deposit of the same asset with no
+  user-supplied basis or acquisition date is treated as those coins returning, up to the
+  quantity parked, and keeps their original basis and acquisition date. Any excess still gets
+  `missing_basis`. A withdrawal classified as `spent` is a disposal and parks nothing.
 
 ## 5. Lot engine
 

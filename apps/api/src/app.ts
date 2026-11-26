@@ -47,7 +47,9 @@ import {
 
 type Env = { Variables: { caller: Caller } };
 
-const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
+// Below what the hosting platforms accept in one request (Vercel Functions ~4.5 MB, Lambda
+// Function URLs 6 MB). Larger files need presigned uploads to S3 (sunveda/iac, taxable/).
+const MAX_IMPORT_BYTES = 4 * 1024 * 1024;
 
 const errorBody = (code: string, message: string) => ({ error: { code, message } });
 const err = (description: string) => ({
@@ -182,7 +184,7 @@ export function createApp(database: Database) {
       middleware: [
         bodyLimit({
           maxSize: MAX_IMPORT_BYTES,
-          onError: (c) => c.json(errorBody('too_large', 'File is larger than 20 MB'), 413),
+          onError: (c) => c.json(errorBody('too_large', 'File is larger than 4 MB'), 413),
         }),
       ] as const,
       request: {

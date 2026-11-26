@@ -32,6 +32,11 @@ export type Effect =
       acquiredAt: Timestamp;
       origin: LotOrigin;
       ruleRefs: RuleId[];
+      /**
+       * An external deposit with no user-supplied basis or acquisition date: it may be coins
+       * coming back from the user's own unconnected wallet (see `UNCONNECTED_WALLETS`).
+       */
+      returnable?: boolean;
     }
   | {
       type: 'dispose';
@@ -98,6 +103,14 @@ export type Effect =
       params: Record<string, string>;
       suggestedResolution?: SuggestedResolution;
     };
+
+/**
+ * Virtual account for wallets the user owns but hasn't connected. Withdrawals treated as
+ * going to the user's own wallet move there with their basis, because the user still owns
+ * the coins (Japan's per-user average cost must keep counting them). Later deposits
+ * without a user-supplied basis come back out of it first.
+ */
+export const UNCONNECTED_WALLETS: AccountId = 'svdt:unconnected-own-wallets';
 
 export interface EffectContext {
   rules: YearRules;
@@ -264,7 +277,15 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
     case 'trade': {
       const sentFiat = isFiat(e.sent.asset);
       const receivedFiat = isFiat(e.received.asset);
-      if (sentFiat && receivedFiat) return out; // currency exchange: out of scope
+      if (sentFiat && receivedFiat) {
+        // The currency exchange itself is out of scope, but a fee paid in crypto still
+        // spends those units, like a standalone fee row.
+        if (e.fee && !dec(e.fee.quantity).isZero() && !isFiat(e.fee.asset)) {
+          const feeValue = valueOrIssue(ctx, e.fee, at, e.id, out, 'either');
+          out.push(...feeEffects(ctx, e.accountId, e.fee, feeValue, { asExpense: true }));
+        }
+        return out;
+      }
 
       // Value the trade from a report-currency side when there is one, else what was
       // received, else what was given up.
@@ -437,6 +458,7 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
         acquiredAt: e.acquiredAt ?? at,
         origin: 'external_deposit',
         ruleRefs: [],
+        ...(e.costBasis || e.acquiredAt ? {} : { returnable: true }),
       });
       return out;
     }

@@ -173,6 +173,16 @@ export const OverrideListSchema = z.object({ data: z.array(OverrideSchema) });
 
 const methodEnum = z.enum(['FIFO', 'LIFO', 'HIFO', 'MOVING_AVERAGE', 'TOTAL_AVERAGE']);
 
+/** True when the runtime knows `tz` as an IANA time zone (the engine formats dates with it). */
+export function isTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const CalculateBody = z
   .object({
     jurisdiction: z.enum(['us', 'jp']),
@@ -183,7 +193,11 @@ export const CalculateBody = z
         byAsset: z.record(z.string(), methodEnum).optional(),
       })
       .optional(),
-    timeZone: z.string().optional().openapi({ example: 'America/New_York' }),
+    timeZone: z
+      .string()
+      .refine(isTimeZone, { message: 'Must be an IANA time zone, e.g. America/New_York' })
+      .optional()
+      .openapi({ example: 'America/New_York' }),
   })
   .openapi('CalculateRequest');
 

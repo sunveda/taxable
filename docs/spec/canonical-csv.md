@@ -10,7 +10,7 @@ the format our own "export ledger" feature will write (gap G7: data ownership).
 - UTF-8, comma-separated, RFC 4180 quoting, first row is the header. Column order doesn't matter; unknown columns are ignored.
 - `timestamp`: ISO-8601. An offset is recommended (`2025-01-02T10:00:00Z`, `2025-01-02T19:00:00+09:00`); if it's missing, UTC is assumed.
 - **Quantities are positive.** The direction comes from the column (`sent_*` vs `received_*`).
-- **Assets** are tickers (`BTC`, `ETH`, `USDC`). Fiat uses its ISO code (`USD`, `JPY`).
+- **Assets** are tickers (`BTC`, `ETH`, `USDC`). Common fiat currencies use their ISO code (`USD`, `JPY`, `NZD`, `MXN`; the list is `packages/importers/src/assets.ts`). Write any other fiat currency as `fiat:XXX` (e.g. `fiat:MNT`): some ISO codes are also crypto tickers, so a bare unknown code is read as crypto.
 - `account` is optional; the account chosen at upload is the default.
 - `id` is optional but recommended. Re-importing rows with the same `id` doesn't duplicate them. Without an `id`, a hash of the row's content is used.
 
@@ -27,8 +27,8 @@ the format our own "export ledger" feature will write (gap G7: data ownership).
 | `value`, `value_currency` | trade, income, deposit, withdrawal, fee | Market value of the received (or sent/fee) amount, if known |
 | `to_account` | transfer | Destination account the user owns |
 | `income_type` | income | `staking`, `mining`, `airdrop`, `interest`, `hard_fork`, `other` |
-| `cost_basis`, `cost_basis_currency` | deposit | Original cost of coins arriving from outside, if known |
-| `acquired_at` | deposit | Original acquisition time, if known |
+| `cost_basis`, `cost_basis_currency` | deposit | Original cost of coins arriving from outside, if known. Must not be negative |
+| `acquired_at` | deposit | Original acquisition time, if known. Must not be later than `timestamp` |
 | `id` | all | Stable row id (optional) |
 
 ## Meaning of each type

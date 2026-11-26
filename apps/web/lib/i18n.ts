@@ -77,7 +77,7 @@ const ja = {
     errors: {
       noFile: 'ファイルを選んでください。',
       badAccount: '口座名は英数字・ドット・ハイフン・下線（64文字以内）で入力してください。',
-      tooLarge: 'ファイルが大きすぎます（20MBまで）。',
+      tooLarge: 'ファイルが大きすぎます（4MBまで）。',
       unknownFormat:
         '対応していない形式です。svdt標準CSV形式に変換してから取り込んでください（docs/spec/canonical-csv.md）。',
       generic: '取り込みに失敗しました。',
@@ -195,6 +195,9 @@ const ja = {
     method: '取得価額の計算方法',
     methodNote:
       '日本では、届出をしない場合は総平均法になります。変更には税務署への届出が必要です。',
+    timeZone: 'タイムゾーン',
+    timeZoneNote: (fallback: string) =>
+      `取引日（課税年度・保有期間）の判定に使います。空欄の場合は ${fallback} です。`,
     language: '表示言語',
     save: '保存',
     backend: '接続先',
@@ -315,7 +318,7 @@ const en: Dict = {
     errors: {
       noFile: 'Choose a file.',
       badAccount: 'Use letters, digits, dots, hyphens or underscores (up to 64).',
-      tooLarge: 'The file is too large (20 MB maximum).',
+      tooLarge: 'The file is too large (4 MB maximum).',
       unknownFormat:
         'Unrecognized format. Convert it to the svdt canonical CSV first (docs/spec/canonical-csv.md).',
       generic: 'The import failed.',
@@ -432,6 +435,9 @@ const en: Dict = {
     method: 'Cost-basis method',
     methodNote:
       'In Japan the total average method applies unless you file a notice to use moving average.',
+    timeZone: 'Time zone',
+    timeZoneNote: (fallback: string) =>
+      `Used to date your transactions (tax year, holding period). Leave empty for ${fallback}.`,
     language: 'Language',
     save: 'Save',
     backend: 'Backend',

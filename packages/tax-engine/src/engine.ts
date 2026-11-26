@@ -20,6 +20,7 @@ import {
 import {
   effectsOfEvent,
   effectsOfOpeningPosition,
+  UNCONNECTED_WALLETS,
   type Effect,
   type EffectContext,
 } from './effects';
@@ -40,7 +41,7 @@ import type {
 } from './types';
 import { Valuer } from './valuation';
 
-export const ENGINE_VERSION = '0.2.0';
+export const ENGINE_VERSION = '0.3.0';
 
 /** One thing that happens at a point in time: a ledger event or a declared opening position. */
 interface Item {
@@ -259,6 +260,7 @@ export function calculate(input: CalculationInput): CalculationResult {
     });
   }
   items.sort((a, b) => a.ms - b.ms || a.rank - b.rank || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  routeReturningDeposits(items);
 
   // --- State ------------------------------------------------------------------------------
   const pools = new Map<string, Pool>();
@@ -330,6 +332,71 @@ export function calculate(input: CalculationInput): CalculationResult {
   };
   const lotRules = (lotId: string | null): RuleId[] =>
     lotId ? (lotsById.get(lotId)?.ruleRefs ?? []) : [];
+
+  /**
+   * Moves units between two of the user's accounts and returns the basis that moved. With
+   * per-user pools the basis stays in the one pool, so only physical holdings change.
+   */
+  const moveUnits = (
+    item: Item,
+    eff: Extract<Effect, { type: 'move' }>,
+    seq: number,
+    what: string,
+  ): Decimal => {
+    adjustPhysical(eff.fromAccountId, eff.asset, eff.quantity.negated());
+    adjustPhysical(eff.toAccountId, eff.asset, eff.quantity);
+    if (scope === 'per_user') {
+      const pool = poolFor(eff.fromAccountId, eff.asset);
+      const pooled = pool.quantity();
+      if (pooled.isZero()) return ZERO;
+      const moved = eff.quantity.lessThan(pooled) ? eff.quantity : pooled;
+      return pool.costBasis().times(moved).dividedBy(pooled);
+    }
+    const baseId = item.eventId ?? item.id;
+    const { parts, shortfall } = poolFor(eff.fromAccountId, eff.asset).take(eff.quantity);
+    const dest = poolFor(eff.toAccountId, eff.asset);
+    parts.forEach((part, i) => {
+      const lot = newLot(
+        {
+          accountId: eff.toAccountId,
+          asset: eff.asset,
+          quantity: part.quantity,
+          costBasis: part.costBasis,
+          acquiredAt: part.acquiredAt ?? item.timestamp,
+          origin: 'transfer',
+          eventId: item.eventId,
+          parentLotId: part.lotId,
+          ruleRefs: lotRules(part.lotId),
+        },
+        part.lotId ? `${part.lotId}>${baseId}` : `${baseId}#${seq}.${i}`,
+      );
+      dest.add(lot);
+    });
+    if (!shortfall.isZero()) {
+      const market = valuer.valueOrEstimate(
+        { asset: eff.asset, quantity: shortfall.toString() },
+        item.timestamp,
+      );
+      shortfallIssue(item, eff.asset, shortfall, market ? market.negated() : null, what);
+      dest.add(
+        newLot(
+          {
+            accountId: eff.toAccountId,
+            asset: eff.asset,
+            quantity: shortfall,
+            costBasis: ZERO,
+            acquiredAt: item.timestamp,
+            origin: 'shortfall',
+            eventId: item.eventId,
+            parentLotId: null,
+            ruleRefs: [],
+          },
+          `${baseId}#${seq}.shortfall`,
+        ),
+      );
+    }
+    return parts.reduce((acc, p) => acc.plus(p.costBasis), ZERO);
+  };
 
   // --- Apply effects ----------------------------------------------------------------------
   const apply = (item: Item, eff: Effect, seq: number): void => {
@@ -436,58 +503,37 @@ export function calculate(input: CalculationInput): CalculationResult {
         return;
       }
       case 'move': {
-        adjustPhysical(eff.fromAccountId, eff.asset, eff.quantity.negated());
-        adjustPhysical(eff.toAccountId, eff.asset, eff.quantity);
-        if (scope === 'per_user') return; // same pool: basis is unaffected
-        const { parts, shortfall } = poolFor(eff.fromAccountId, eff.asset).take(eff.quantity);
-        const dest = poolFor(eff.toAccountId, eff.asset);
-        parts.forEach((part, i) => {
-          const lot = newLot(
-            {
-              accountId: eff.toAccountId,
-              asset: eff.asset,
-              quantity: part.quantity,
-              costBasis: part.costBasis,
-              acquiredAt: part.acquiredAt ?? item.timestamp,
-              origin: 'transfer',
-              eventId: item.eventId,
-              parentLotId: part.lotId,
-              ruleRefs: lotRules(part.lotId),
-            },
-            part.lotId ? `${part.lotId}>${baseId}` : `${baseId}#${seq}.${i}`,
-          );
-          dest.add(lot);
-        });
-        if (!shortfall.isZero()) {
-          const market = valuer.valueOrEstimate(
-            { asset: eff.asset, quantity: shortfall.toString() },
-            item.timestamp,
-          );
-          shortfallIssue(item, eff.asset, shortfall, market ? market.negated() : null, 'Transfers');
-          dest.add(
-            newLot(
-              {
-                accountId: eff.toAccountId,
-                asset: eff.asset,
-                quantity: shortfall,
-                costBasis: ZERO,
-                acquiredAt: item.timestamp,
-                origin: 'shortfall',
-                eventId: item.eventId,
-                parentLotId: null,
-                ruleRefs: [],
-              },
-              `${baseId}#${seq}.shortfall`,
-            ),
-          );
-        }
+        moveUnits(item, eff, seq, 'Transfers');
         return;
       }
       case 'remove': {
-        const { parts, shortfall } = poolFor(eff.accountId, eff.asset).take(eff.quantity);
-        adjustPhysical(eff.accountId, eff.asset, eff.quantity.negated());
-        const removedBasis = parts.reduce((acc, p) => acc.plus(p.costBasis), ZERO);
-        if (!shortfall.isZero()) shortfallIssue(item, eff.asset, shortfall, null, 'Sends');
+        const held = physical.get(holdingKey(eff.accountId, eff.asset)) ?? ZERO;
+        let removedBasis: Decimal;
+        if (eff.withdrawal) {
+          // Sent to the user's own wallet (the default) or not yet classified: still the
+          // user's coins, so they keep their basis in the unconnected-wallets account.
+          if (scope === 'per_user' && eff.quantity.greaterThan(held)) {
+            shortfallIssue(item, eff.asset, eff.quantity.minus(held), null, 'Sends');
+          }
+          removedBasis = moveUnits(
+            item,
+            {
+              type: 'move',
+              fromAccountId: eff.accountId,
+              toAccountId: UNCONNECTED_WALLETS,
+              asset: eff.asset,
+              quantity: eff.quantity,
+            },
+            seq,
+            'Sends',
+          );
+        } else {
+          // A fee that isn't a disposal: the units are gone.
+          const { parts, shortfall } = poolFor(eff.accountId, eff.asset).take(eff.quantity);
+          adjustPhysical(eff.accountId, eff.asset, eff.quantity.negated());
+          removedBasis = parts.reduce((acc, p) => acc.plus(p.costBasis), ZERO);
+          if (!shortfall.isZero()) shortfallIssue(item, eff.asset, shortfall, null, 'Sends');
+        }
         if (eff.confirmedOwnWallet) return;
         const potentialGain = eff.marketValue ? eff.marketValue.minus(removedBasis) : ZERO;
         addIssue(
@@ -656,6 +702,65 @@ export function calculate(input: CalculationInput): CalculationResult {
     overrides: resolved.outcomes,
     summary: summarize(pack, { disposals, income, expenses }, timeZone),
   };
+}
+
+/**
+ * Coins withdrawn to the user's own wallet (the default until classified as spent) are
+ * parked in `UNCONNECTED_WALLETS`. A later deposit of the same asset with no user-supplied
+ * basis or date most likely brings them back, so that part becomes a move out of the
+ * virtual account and keeps its original basis and acquisition date, instead of arriving
+ * at a basis of 0. Rewritten before any year runs, so total-average pools are announced
+ * only the deposits that really are new acquisitions.
+ */
+function routeReturningDeposits(items: Item[]): void {
+  const parked = new Map<AssetId, Decimal>();
+  for (const item of items) {
+    let returned: { asset: AssetId; back: Decimal; rest: Decimal } | null = null;
+    const next: Effect[] = [];
+    for (const eff of item.effects) {
+      if (eff.type === 'remove' && eff.withdrawal) {
+        parked.set(eff.asset, (parked.get(eff.asset) ?? ZERO).plus(eff.quantity));
+      } else if (eff.type === 'acquire' && eff.returnable) {
+        const available = parked.get(eff.asset) ?? ZERO;
+        const back = available.lessThan(eff.quantity) ? available : eff.quantity;
+        if (back.greaterThan(ZERO)) {
+          parked.set(eff.asset, available.minus(back));
+          const rest = eff.quantity.minus(back);
+          returned = { asset: eff.asset, back, rest };
+          next.push({
+            type: 'move',
+            fromAccountId: UNCONNECTED_WALLETS,
+            toAccountId: eff.accountId,
+            asset: eff.asset,
+            quantity: back,
+          });
+          if (rest.greaterThan(ZERO)) next.push({ ...eff, quantity: rest });
+          continue;
+        }
+      }
+      next.push(eff);
+    }
+    if (returned) {
+      const { asset, back, rest } = returned;
+      item.effects = next.flatMap((eff): Effect[] => {
+        if (eff.type !== 'issue' || eff.kind !== 'missing_basis' || eff.asset !== asset) {
+          return [eff];
+        }
+        if (!rest.greaterThan(ZERO)) return [];
+        const share = rest.dividedBy(rest.plus(back));
+        return [
+          {
+            ...eff,
+            impact: { min: eff.impact.min.times(share), max: eff.impact.max.times(share) },
+            message: `Cost basis unknown for ${rest.toString()} ${asset} received from an external wallet; assumed 0. (${back.toString()} more were matched to coins sent earlier to your own wallet and keep their basis.)`,
+            params: { ...eff.params, quantity: rest.toString(), returned: back.toString() },
+          },
+        ];
+      });
+    } else {
+      item.effects = next;
+    }
+  }
 }
 
 function cmp(a: string, b: string): number {

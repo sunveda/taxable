@@ -1,3 +1,4 @@
+import { rulePacks } from '@svdt/rule-packs';
 import type { Metadata } from 'next';
 import { getBackend } from '../../lib/backend';
 import { t } from '../../lib/i18n';
@@ -50,6 +51,26 @@ export default async function Settings() {
               <span className="hint">{tr.settings.methodNote}</span>
             ) : null}
           </label>
+          {rulePacks[session.jurisdiction].timeZoneFromUser ? (
+            <label>
+              {tr.settings.timeZone}
+              <input
+                name="timeZone"
+                list="time-zones"
+                defaultValue={session.timeZone ?? ''}
+                placeholder={rulePacks[session.jurisdiction].defaultTimeZone}
+                autoComplete="off"
+              />
+              <datalist id="time-zones">
+                {Intl.supportedValuesOf('timeZone').map((z) => (
+                  <option key={z} value={z} />
+                ))}
+              </datalist>
+              <span className="hint">
+                {tr.settings.timeZoneNote(rulePacks[session.jurisdiction].defaultTimeZone)}
+              </span>
+            </label>
+          ) : null}
           <label>
             {tr.settings.language}
             <select name="lang" defaultValue={session.lang}>

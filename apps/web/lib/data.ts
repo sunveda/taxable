@@ -13,6 +13,9 @@ export const getCalculation = cache(
         jurisdiction: session.jurisdiction,
         taxYear: session.taxYear,
         methods: { default: session.method },
+        // Dates events (tax year, holding period) in the taxpayer's zone where the rule pack
+        // uses one; the engine ignores it otherwise.
+        ...(session.timeZone ? { timeZone: session.timeZone } : {}),
       });
       return { session, calc, error: null };
     } catch (e) {

@@ -255,6 +255,19 @@ describe('validation and errors', () => {
     expect(res.status).toBe(422);
   });
 
+  it('rejects an unknown time zone as 400, and accepts a real one', async () => {
+    const userId = await newUser();
+    await importCsv(userId);
+    const calc = (timeZone: string) =>
+      call('POST', `/v1/users/${userId}/calculations`, {
+        json: { jurisdiction: 'us', taxYear: 2025, timeZone },
+      });
+    expect((await calc('not/a-zone')).status).toBe(400);
+    const ok = await calc('America/Los_Angeles');
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as { timeZone: string }).timeZone).toBe('America/Los_Angeles');
+  });
+
   it('enforces unique externalRef per tenant', async () => {
     const ref = { externalRef: 'partner-user-1' };
     expect((await call('POST', '/v1/users', { json: ref })).status).toBe(201);

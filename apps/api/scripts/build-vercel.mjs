@@ -3,6 +3,7 @@
 // so bundling is what makes them runnable; PGlite (local/test only) stays out.
 import { build } from 'esbuild';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 const out = new URL('../.vercel/output/', import.meta.url);
 const fn = new URL('functions/index.func/', out);
@@ -11,8 +12,8 @@ await rm(out, { recursive: true, force: true });
 await mkdir(fn, { recursive: true });
 
 await build({
-  entryPoints: [new URL('../src/vercel.ts', import.meta.url).pathname],
-  outfile: new URL('index.mjs', fn).pathname,
+  entryPoints: [fileURLToPath(new URL('../src/vercel.ts', import.meta.url))],
+  outfile: fileURLToPath(new URL('index.mjs', fn)),
   bundle: true,
   platform: 'node',
   target: 'node22',
