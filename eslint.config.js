@@ -17,6 +17,7 @@ export default tseslint.config(
       '**/dist/**',
       '**/.turbo/**',
       '**/.vercel/**',
+      '**/.lambda/**',
       '**/next-env.d.ts',
     ],
   },

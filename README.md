@@ -71,6 +71,20 @@ The database is Supabase in Tokyo (Vercel Marketplace), connected to `svdt-taxab
 operator step, run against `POSTGRES_URL_NON_POOLING`. The web project has `SVDT_API_URL`,
 `SVDT_API_KEY` (sensitive) and `SVDT_USER_ID`.
 
+### Deployment (AWS Lambda, API; migration in progress)
+
+The API is moving to the Lambda function `svdt-taxable-api`, behind a Function URL. The infrastructure
+is Terraform in [`sunveda/iac`](https://github.com/sunveda/iac) (`taxable/`). It runs in Sydney
+(`ap-southeast-2`) for now, because the AWS account's free plan only allows its home Region.
+
+- **Build:** `pnpm --filter @svdt/api build:lambda` bundles `src/lambda.ts` into `apps/api/.lambda/`.
+- **Deploy:** `.github/workflows/deploy-api.yml` runs on pushes to `main` that touch the API, or by
+  hand. It runs in the GitHub `production` environment, uploads the bundle, then checks `/v1/health`.
+- **Secrets:** SSM Parameter Store SecureStrings, read at cold start. They are created by hand, never
+  in Terraform or this repo:
+  - `/taxable/prod/DATABASE_URL`: Supabase's pooled connection string.
+  - `/taxable/prod/DATABASE_CA_CERT`: PEM text of the Supabase CA.
+
 ### API
 
 Without `DATABASE_URL`, the API uses an embedded Postgres (PGlite) in `apps/api/.data/`, so no

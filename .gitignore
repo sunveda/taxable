@@ -11,3 +11,5 @@ coverage/
 next-env.d.ts
 .data/
 .vercel/
+.lambda/
+lambda.zip
