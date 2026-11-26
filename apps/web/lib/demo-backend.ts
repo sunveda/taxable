@@ -168,6 +168,7 @@ export const demoBackend: Backend = {
         events: matched.events,
         overrides,
         ...(req.methods?.default ? { methods: { default: req.methods.default } } : {}),
+        ...(req.timeZone ? { timeZone: req.timeZone } : {}),
       });
       const plain = JSON.parse(JSON.stringify(result)) as Omit<Calculation, 'transferMatches'>;
       return { ...plain, transferMatches: matched.matches };

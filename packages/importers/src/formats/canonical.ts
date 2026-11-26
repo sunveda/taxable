@@ -1,4 +1,4 @@
-import type { AssetAmount, IncomeType, LedgerEvent } from '@svdt/domain';
+import { parseInstant, type AssetAmount, type IncomeType, type LedgerEvent } from '@svdt/domain';
 import { normalizeTicker } from '../assets';
 import type { CsvTable } from '../csv';
 import type { CsvImporter, ImportContext, ImportResult, ImportWarning } from '../types';
@@ -67,16 +67,28 @@ export const canonicalCsv: CsvImporter = {
         warn('invalid_number', 'value must be a number and needs value_currency.');
         continue;
       }
-      if (
-        filled('cost_basis') &&
-        (!parseAmount(cells['cost_basis']) || !filled('cost_basis_currency'))
-      ) {
-        warn('invalid_number', 'cost_basis must be a number and needs cost_basis_currency.');
-        continue;
+      if (filled('cost_basis')) {
+        // Same invariants as the set_cost_basis override: a number, non-negative, with currency.
+        const basis = parseAmount(cells['cost_basis']);
+        if (!basis || basis.isNegative() || !filled('cost_basis_currency')) {
+          warn(
+            'invalid_number',
+            'cost_basis must be a non-negative number and needs cost_basis_currency.',
+          );
+          continue;
+        }
       }
-      if (filled('acquired_at') && !parseTimestamp(cells['acquired_at'], 'Z')) {
-        warn('invalid_timestamp', `Unreadable acquired_at "${cells['acquired_at'] ?? ''}".`);
-        continue;
+      if (filled('acquired_at')) {
+        const acquired = parseTimestamp(cells['acquired_at'], 'Z');
+        if (!acquired) {
+          warn('invalid_timestamp', `Unreadable acquired_at "${cells['acquired_at'] ?? ''}".`);
+          continue;
+        }
+        // A lot can't be acquired after it arrives; it would skew holding periods.
+        if (parseInstant(acquired) > parseInstant(timestamp)) {
+          warn('invalid_timestamp', 'acquired_at must not be later than the row timestamp.');
+          continue;
+        }
       }
       const feePart = fee ? { fee } : {};
       const sourceRef = `line ${line}`;

@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import { ApiError, type ImportResult, type OverrideAction } from '../lib/api-types';
 import { getBackend } from '../lib/backend';
-import { getSession, METHODS, taxYears } from '../lib/session';
+import { getSession, isTimeZone, METHODS, taxYears } from '../lib/session';
 
 /**
  * Server Functions. Each re-reads the session itself: they are reachable by direct POST,
@@ -13,7 +13,8 @@ import { getSession, METHODS, taxYears } from '../lib/session';
  */
 
 const YEAR = 60 * 60 * 24 * 365;
-const MAX_BYTES = 20 * 1024 * 1024;
+// Matches the API limit (apps/api/src/app.ts): hosting platforms cap request bodies near 4.5 MB.
+const MAX_BYTES = 4 * 1024 * 1024;
 const ACCOUNT = /^[A-Za-z0-9._-]{1,64}$/;
 const DECIMAL = /^\d+(\.\d+)?$/;
 
@@ -31,6 +32,13 @@ export async function saveSettings(form: FormData): Promise<void> {
     const method = String(form.get('method') ?? '');
     if ((METHODS[j] as readonly string[]).includes(method)) set('svdt_method', method);
     else c.delete('svdt_method');
+  }
+  // Only sent when the form shows the field (rule packs that use the user's zone).
+  const tz = form.get('timeZone');
+  if (typeof tz === 'string') {
+    const zone = tz.trim();
+    if (zone === '') c.delete('svdt_tz');
+    else if (isTimeZone(zone)) set('svdt_tz', zone);
   }
   revalidatePath('/', 'layout');
 }

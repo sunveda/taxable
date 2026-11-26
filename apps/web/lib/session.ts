@@ -15,6 +15,35 @@ export interface Session {
   jurisdiction: Jurisdiction;
   taxYear: number;
   method: Method;
+  /**
+   * The taxpayer's IANA time zone, for rule packs that date events in the user's zone (US).
+   * `null` means the rule pack's default (America/New_York for the US; Japan always uses
+   * Asia/Tokyo).
+   */
+  timeZone: string | null;
+}
+
+/** True when the runtime knows `tz` as an IANA time zone. */
+export function isTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The API user the app acts as. With a real API configured it must be set: the demo id
+ * isn't a UUID, so every API call would fail with a 400.
+ */
+function configuredUserId(): string {
+  const id = process.env['SVDT_USER_ID'];
+  if (id) return id;
+  if (process.env['SVDT_API_URL'] && process.env['SVDT_API_KEY']) {
+    throw new Error('SVDT_USER_ID must be set when SVDT_API_URL and SVDT_API_KEY are set.');
+  }
+  return 'demo';
 }
 
 export const METHODS: Record<Jurisdiction, readonly Method[]> = {
@@ -39,8 +68,10 @@ export async function getSession(): Promise<Session> {
   const years = taxYears(jurisdiction);
   const year = Number(c.get('svdt_year')?.value);
   const method = c.get('svdt_method')?.value as Method | undefined;
+  const tz = c.get('svdt_tz')?.value;
   return {
-    userId: process.env['SVDT_USER_ID'] ?? 'demo',
+    userId: configuredUserId(),
+    timeZone: tz && isTimeZone(tz) ? tz : null,
     lang,
     jurisdiction,
     taxYear: years.includes(year) ? year : years[0]!,

@@ -219,6 +219,8 @@ export interface CalculateRequest {
   jurisdiction: Jurisdiction;
   taxYear: number;
   methods?: { default?: Method };
+  /** IANA time zone; used by rule packs that date events in the user's zone (US). */
+  timeZone?: string;
 }
 
 /** An error the API reported, with its machine-readable code. */
