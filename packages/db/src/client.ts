@@ -35,11 +35,7 @@ export async function createDatabase(
   opts: ConnectionOptions = {},
 ): Promise<Database> {
   if (url && /^postgres(ql)?:\/\//.test(url)) {
-    const pool = new pg.Pool({
-      ...connection(url, opts.caCert),
-      ...(opts.password ? { password: opts.password } : {}),
-      max: 5,
-    });
+    const pool = new pg.Pool({ ...connection(url, opts), max: 5 });
     return {
       db: drizzlePg(pool, { schema }) as unknown as Db,
       exec: async (script) => {
@@ -77,14 +73,29 @@ export async function createDatabase(
 /**
  * With a CA certificate (PEM), TLS is verified against it and the server's hostname
  * (libpq `verify-full`). Hosted Postgres often signs with its own CA (Amazon RDS, or
- * Supabase's `prod-ca-2021.crt`), which Node doesn't trust by default. The URL's `sslmode` is dropped
- * in that case: node-postgres lets it override the explicit TLS settings.
+ * Supabase's `prod-ca-2021.crt`), which Node doesn't trust by default. The URL's `sslmode`
+ * is dropped in that case: node-postgres lets it override the explicit TLS settings.
+ *
+ * With a password provider the URL is split into fields instead: node-postgres merges a
+ * parsed `connectionString` over the other options, and a URL without a password would
+ * replace the provider with an empty password.
  */
-function connection(url: string, caCert: string | undefined): pg.PoolConfig {
-  if (!caCert) return { connectionString: url };
+function connection(url: string, { caCert, password }: ConnectionOptions): pg.PoolConfig {
+  if (!caCert && !password) return { connectionString: url };
+  const ssl = caCert ? { ssl: { ca: caCert, rejectUnauthorized: true } } : {};
   const u = new URL(url);
+  if (password) {
+    return {
+      host: u.hostname,
+      port: u.port ? Number(u.port) : 5432,
+      user: decodeURIComponent(u.username),
+      database: decodeURIComponent(u.pathname.replace(/^\//, '')),
+      password,
+      ...ssl,
+    };
+  }
   u.searchParams.delete('sslmode');
-  return { connectionString: u.toString(), ssl: { ca: caCert, rejectUnauthorized: true } };
+  return { connectionString: u.toString(), ...ssl };
 }
 
 /**

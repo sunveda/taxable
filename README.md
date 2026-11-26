@@ -71,10 +71,10 @@ The database is Supabase in Tokyo (Vercel Marketplace), connected to `svdt-taxab
 operator step, run against `POSTGRES_URL_NON_POOLING`. The web project has `SVDT_API_URL`,
 `SVDT_API_KEY` (sensitive) and `SVDT_USER_ID`.
 
-### Deployment (AWS Lambda + Aurora, API; migration in progress)
+### Deployment (AWS Lambda + RDS for PostgreSQL, API; migration in progress)
 
-The API is moving to the Lambda function `svdt-taxable-api`, behind a Function URL, with Aurora
-PostgreSQL (serverless) as its database. The infrastructure is Terraform in
+The API is moving to the Lambda function `svdt-taxable-api`, behind a Function URL, with RDS for
+PostgreSQL as its database. The infrastructure is Terraform in
 [`sunveda/iac`](https://github.com/sunveda/iac) (`taxable/`). Both run in Sydney (`ap-southeast-2`)
 for now, because the AWS account's free plan only allows its home Region.
 
@@ -89,6 +89,8 @@ for now, because the AWS account's free plan only allows its home Region.
 - **Operator actions:** invoke the function directly (needs IAM permission; the public URL can't):
 
   ```sh
+  aws lambda invoke --function-name svdt-taxable-api --cli-binary-format raw-in-base64-out \
+    --payload '{"svdt":"bootstrap"}' out.json   # once per new database (see sunveda/iac README)
   aws lambda invoke --function-name svdt-taxable-api --cli-binary-format raw-in-base64-out \
     --payload '{"svdt":"migrate"}' out.json
   aws lambda invoke --function-name svdt-taxable-api --cli-binary-format raw-in-base64-out \
