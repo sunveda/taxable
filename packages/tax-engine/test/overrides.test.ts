@@ -163,8 +163,13 @@ describe('override actions', () => {
 });
 
 describe('override history', () => {
+  // With a date, so the only issues left are the ones these tests are about.
   const basis = (amount: string, createdAt: string): Override =>
-    override('dep-1', { type: 'set_cost_basis', costBasis: amount }, createdAt);
+    override(
+      'dep-1',
+      { type: 'set_cost_basis', costBasis: amount, acquiredAt: '2024-01-10T15:00:00Z' },
+      createdAt,
+    );
 
   it('latest override wins, regardless of input order', () => {
     const older = basis('1000', '2026-01-01T00:00:00Z');

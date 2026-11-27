@@ -15,8 +15,10 @@ import { demoBackend } from './demo-backend';
  * Everything the web app needs from the backend, shaped exactly like the API (ADR-0011:
  * the web app is an API client). Two implementations:
  * - `SVDT_API_URL` + `SVDT_API_KEY` set: the real API over HTTP.
- * - otherwise: an in-memory placeholder that runs the same importers and engine, seeded
+ * - neither set: an in-memory placeholder that runs the same importers and engine, seeded
  *   with sample data, so the UI works before the API is deployed.
+ * Only one of the two set is a configuration error, not a reason to fall back to the demo:
+ * the site would show sample data and drop imports while looking live.
  */
 export interface Backend {
   readonly mode: 'api' | 'demo';
@@ -37,7 +39,13 @@ export interface Backend {
 export function getBackend(): Backend {
   const url = process.env['SVDT_API_URL'];
   const key = process.env['SVDT_API_KEY'];
-  return url && key ? httpBackend(url.replace(/\/$/, ''), key) : demoBackend;
+  if (url && key) return httpBackend(url.replace(/\/$/, ''), key);
+  if (url || key) {
+    throw new Error(
+      'Set both SVDT_API_URL and SVDT_API_KEY to use the API, or neither for the demo.',
+    );
+  }
+  return demoBackend;
 }
 
 function httpBackend(base: string, key: string): Backend {

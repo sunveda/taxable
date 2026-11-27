@@ -131,6 +131,7 @@ flowchart LR
 | `negative_balance` (transfer) | market value, or nearest-price estimate, else unknown |
 | `negative_balance` (send to unknown wallet) | unknown |
 | `missing_basis` | −(market value on arrival, or nearest-price estimate), else unknown |
+| `missing_acquisition_date` (deposit with basis, no date; holding-period rules only) | unknown (the term may be wrong) |
 | `missing_price` | nearest-price estimate, else unknown |
 | `unmatched_withdrawal` | + gain if it were a sale (market value or estimate), else unknown |
 | `opening_position_mismatch` | unknown |

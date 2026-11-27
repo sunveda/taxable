@@ -169,23 +169,32 @@ export const krakenLedgersCsv: CsvImporter = {
         }
         const sent = out[0]!;
         const recv = inn[0]!;
-        const fees = real.filter((g) => !g.fee.isZero());
-        const [primaryFee, ...extraFees] = fees;
+        // Every fee is a cost of this trade. A trade holds one fee, so the first is kept as
+        // the fee and any fee in the other leg's asset is netted into that leg: fewer units
+        // received, or more units given up. Either way it raises the basis of what was
+        // bought, or lowers the proceeds of what was sold, as a trade fee should.
+        let sentQty = sent.amount.abs();
+        let recvQty = recv.amount;
+        let fee: { asset: string; quantity: Decimal } | null = null;
+        for (const f of real.filter((g) => !g.fee.isZero())) {
+          if (!fee || f.asset === fee.asset) {
+            fee = { asset: f.asset, quantity: fee ? fee.quantity.plus(f.fee) : f.fee };
+          } else if (f === recv) {
+            recvQty = recvQty.minus(f.fee);
+          } else {
+            sentQty = sentQty.plus(f.fee);
+          }
+        }
         events.push({
           kind: 'trade',
           id,
           timestamp: first.time,
           accountId,
-          sent: { asset: sent.asset, quantity: sent.amount.abs().toFixed() },
-          received: { asset: recv.asset, quantity: recv.amount.toFixed() },
-          ...(primaryFee
-            ? { fee: { asset: primaryFee.asset, quantity: primaryFee.fee.toFixed() } }
-            : {}),
+          sent: { asset: sent.asset, quantity: sentQty.toFixed() },
+          received: { asset: recv.asset, quantity: recvQty.toFixed() },
+          ...(fee ? { fee: { asset: fee.asset, quantity: fee.quantity.toFixed() } } : {}),
           sourceRef,
         });
-        extraFees.forEach((f, i) =>
-          events.push(feeEvent(`${id}:fee${i + 2}`, f, accountId, sourceRef)),
-        );
         imported += real.length;
         skipped += group.length - real.length; // KFEE fee-credit rows
         continue;

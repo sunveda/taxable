@@ -40,16 +40,26 @@ export const canonicalCsv: CsvImporter = {
       }
       const id = cells['id'] ? `canonical:${ctx.accountId}:${cells['id']}` : ids.next(cells);
       const accountId = cells['account'] || ctx.accountId;
-      const amount = (assetCol: string, qtyCol: string): AssetAmount | null | undefined => {
+      // Quantities are positive; the column gives the direction (docs/spec/canonical-csv.md).
+      // A sign is an error, not something to flip. A zero fee means no fee.
+      const amount = (
+        assetCol: string,
+        qtyCol: string,
+        zeroIsNone = false,
+      ): AssetAmount | null | undefined => {
         const asset = cells[assetCol];
         const qtyRaw = cells[qtyCol];
         if (!asset && !qtyRaw) return undefined;
         const q = parseAmount(qtyRaw);
-        if (!asset || !q) {
-          warn('invalid_number', `Column ${assetCol}/${qtyCol} must hold an asset and a number.`);
+        if (q && zeroIsNone && q.isZero()) return undefined;
+        if (!asset || !q || !q.greaterThan(0)) {
+          warn(
+            'invalid_number',
+            `Column ${assetCol}/${qtyCol} must hold an asset and a positive number.`,
+          );
           return null;
         }
-        return { asset: normalizeTicker(asset), quantity: q.abs().toFixed() };
+        return { asset: normalizeTicker(asset), quantity: q.toFixed() };
       };
       const withValue = (a: AssetAmount): AssetAmount => {
         const v = parseAmount(cells['value']);
@@ -58,14 +68,18 @@ export const canonicalCsv: CsvImporter = {
       };
       const sent = amount('sent_asset', 'sent_quantity');
       const received = amount('received_asset', 'received_quantity');
-      const fee = amount('fee_asset', 'fee_quantity');
+      const fee = amount('fee_asset', 'fee_quantity', true);
       if (sent === null || received === null || fee === null) continue;
       // Optional columns: a value that is present but unreadable is an error, never ignored
       // (e.g. a malformed acquired_at would silently turn a long-term holding short-term).
       const filled = (col: string): boolean => (cells[col] ?? '') !== '';
-      if (filled('value') && (!parseAmount(cells['value']) || !filled('value_currency'))) {
-        warn('invalid_number', 'value must be a number and needs value_currency.');
-        continue;
+      if (filled('value')) {
+        // A market value can't be negative: it would invert basis and income.
+        const v = parseAmount(cells['value']);
+        if (!v || v.isNegative() || !filled('value_currency')) {
+          warn('invalid_number', 'value must be a non-negative number and needs value_currency.');
+          continue;
+        }
       }
       if (filled('cost_basis')) {
         // Same invariants as the set_cost_basis override: a number, non-negative, with currency.
