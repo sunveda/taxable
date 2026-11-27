@@ -126,6 +126,7 @@ function ManualFix({
           <form action={addOverride} className="row">
             {hidden}
             <input type="hidden" name="type" value="set_cost_basis" />
+            <input type="hidden" name="receivedAt" value={issue.params['receivedAt'] ?? ''} />
             <label>
               {tr.fixes.costBasis} ({currency})
               <input

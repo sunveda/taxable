@@ -169,30 +169,21 @@ export const krakenLedgersCsv: CsvImporter = {
         }
         const sent = out[0]!;
         const recv = inn[0]!;
-        // Every fee is a cost of this trade. A trade holds one fee, so the first is kept as
-        // the fee and any fee in the other leg's asset is netted into that leg: fewer units
-        // received, or more units given up. Either way it raises the basis of what was
-        // bought, or lowers the proceeds of what was sold, as a trade fee should.
-        let sentQty = sent.amount.abs();
-        let recvQty = recv.amount;
-        let fee: { asset: string; quantity: Decimal } | null = null;
-        for (const f of real.filter((g) => !g.fee.isZero())) {
-          if (!fee || f.asset === fee.asset) {
-            fee = { asset: f.asset, quantity: fee ? fee.quantity.plus(f.fee) : f.fee };
-          } else if (f === recv) {
-            recvQty = recvQty.minus(f.fee);
-          } else {
-            sentQty = sentQty.plus(f.fee);
-          }
-        }
+        // Every fee is a cost of this trade, decided by leg, never by row order. A trade holds
+        // one fee: a single fee is kept as it is. With a fee on both legs, the sent leg's fee
+        // is kept and the received leg's is netted into what arrived (fewer units received,
+        // so a higher basis per unit), as a fee taken from the proceeds of a trade is.
+        const both = !sent.fee.isZero() && !recv.fee.isZero();
+        const kept = !sent.fee.isZero() ? sent : !recv.fee.isZero() ? recv : null;
+        const recvQty = both ? recv.amount.minus(recv.fee) : recv.amount;
         events.push({
           kind: 'trade',
           id,
           timestamp: first.time,
           accountId,
-          sent: { asset: sent.asset, quantity: sentQty.toFixed() },
+          sent: { asset: sent.asset, quantity: sent.amount.abs().toFixed() },
           received: { asset: recv.asset, quantity: recvQty.toFixed() },
-          ...(fee ? { fee: { asset: fee.asset, quantity: fee.quantity.toFixed() } } : {}),
+          ...(kept ? { fee: { asset: kept.asset, quantity: kept.fee.toFixed() } } : {}),
           sourceRef,
         });
         imported += real.length;

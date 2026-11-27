@@ -448,7 +448,12 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
           impact: { min: market ? market.negated() : ZERO, max: ZERO },
           impactKnown: market !== null,
           message: `Cost basis unknown for ${e.received.quantity} ${e.received.asset} received from an external wallet; assumed 0.`,
-          params: { asset: e.received.asset, quantity: e.received.quantity },
+          // receivedAt: so a fix form can accept the arrival day itself as the date bought.
+          params: {
+            asset: e.received.asset,
+            quantity: e.received.quantity,
+            receivedAt: e.timestamp,
+          },
         });
       } else if (!e.acquiredAt && ctx.rules.holdingPeriod) {
         // The basis is known but not when the coins were bought. The holding period then
@@ -465,6 +470,7 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
             asset: e.received.asset,
             quantity: e.received.quantity,
             costBasis: basis.toFixed(),
+            receivedAt: e.timestamp,
           },
         });
       }

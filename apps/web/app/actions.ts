@@ -97,13 +97,30 @@ export async function importFile(_prev: ImportState, form: FormData): Promise<Im
 export async function addOverride(form: FormData): Promise<void> {
   const session = await getSession();
   const eventId = String(form.get('eventId') ?? '');
-  const action = parseAction(form, session.jurisdiction);
+  // The zone calendar dates are read in: the rule pack's (Japan) or the user's (US).
+  const zone =
+    session.jurisdiction === 'jp' ? 'Asia/Tokyo' : (session.timeZone ?? 'America/New_York');
+  const action = parseAction(form, session.jurisdiction, zone);
   if (!eventId || !action) return;
   await getBackend().addOverride(session.userId, { eventId, action });
   revalidatePath('/', 'layout');
 }
 
-function parseAction(form: FormData, jurisdiction: 'jp' | 'us'): OverrideAction | null {
+/** `YYYY-MM-DD` of an instant in a time zone. */
+function localDay(instant: string, zone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: zone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(instant));
+}
+
+function parseAction(
+  form: FormData,
+  jurisdiction: 'jp' | 'us',
+  zone: string,
+): OverrideAction | null {
   const type = form.get('type');
   const num = (name: string): string | undefined => {
     const v = String(form.get(name) ?? '')
@@ -124,7 +141,19 @@ function parseAction(form: FormData, jurisdiction: 'jp' | 'us'): OverrideAction 
       // A calendar date: midnight in Japan; noon UTC for the US, which is that same date in
       // every US time zone.
       const time = jurisdiction === 'jp' ? 'T00:00:00+09:00' : 'T12:00:00Z';
-      const acquiredAt = /^\d{4}-\d\d-\d\d$/.test(day) ? `${day}${time}` : undefined;
+      let acquiredAt = /^\d{4}-\d\d-\d\d$/.test(day) ? `${day}${time}` : undefined;
+      // Bought on the day the coins arrived: noon UTC can fall after the arrival itself,
+      // which the engine rejects (acquired_after_receipt), so use the arrival instant.
+      // The engine still checks the date against the real event.
+      const receivedAt = String(form.get('receivedAt') ?? '');
+      if (
+        acquiredAt &&
+        !Number.isNaN(Date.parse(receivedAt)) &&
+        Date.parse(acquiredAt) > Date.parse(receivedAt) &&
+        localDay(receivedAt, zone) === day
+      ) {
+        acquiredAt = receivedAt;
+      }
       return { type, costBasis, ...(acquiredAt ? { acquiredAt } : {}) };
     }
     case 'classify_withdrawal': {

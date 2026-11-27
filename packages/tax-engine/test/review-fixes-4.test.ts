@@ -23,8 +23,37 @@ describe('external deposits with a basis but no acquisition date', () => {
       eventIds: ['in-1'],
       asset: 'BTC',
       impactKnown: false,
-      params: { asset: 'BTC', quantity: '1', costBasis: '20000' },
+      params: {
+        asset: 'BTC',
+        quantity: '1',
+        costBasis: '20000',
+        receivedAt: '2025-01-10T15:00:00Z',
+      },
     });
+  });
+
+  it('US: dating the purchase at the arrival instant resolves it', () => {
+    // What the web fix form sends when the user picks the arrival day itself.
+    const r = calculate({
+      rulePack: us,
+      taxYear: 2025,
+      events: [depositWithBasis()],
+      overrides: [
+        {
+          id: 'o-1',
+          eventId: 'in-1',
+          createdAt: '2026-01-01T00:00:00Z',
+          author: 'user',
+          action: {
+            type: 'set_cost_basis',
+            costBasis: '20000',
+            acquiredAt: '2025-01-10T15:00:00Z',
+          },
+        },
+      ],
+    });
+    expect(r.overrides.map((o) => o.status)).toEqual(['applied']);
+    expect(r.issues.map((i) => i.kind)).toEqual([]);
   });
 
   it('US: no issue once the acquisition date is known', () => {
