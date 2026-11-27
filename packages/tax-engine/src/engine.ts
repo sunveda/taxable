@@ -41,7 +41,7 @@ import type {
 } from './types';
 import { Valuer } from './valuation';
 
-export const ENGINE_VERSION = '0.3.0';
+export const ENGINE_VERSION = '0.4.0';
 
 /** One thing that happens at a point in time: a ledger event or a declared opening position. */
 interface Item {
@@ -570,7 +570,9 @@ export function calculate(input: CalculationInput): CalculationResult {
         const key = holdingKey(eff.accountId, eff.asset);
         const held = physical.get(key) ?? ZERO;
         const declared = eff.lots.reduce((acc, l) => acc.plus(l.quantity), ZERO);
-        if (!held.equals(declared)) {
+        // Only a reallocation (the safe harbor) must match the history. An opening balance
+        // stands in for history that wasn't imported, so the history can't match it.
+        if (eff.reconcile && !held.equals(declared)) {
           addIssue(
             {
               kind: 'opening_position_mismatch',

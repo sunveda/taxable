@@ -116,24 +116,36 @@ function ManualFix({
         </details>
       );
     case 'missing_basis':
+    case 'missing_acquisition_date': {
+      // Both are fixed with set_cost_basis; when only the date is missing, the known basis
+      // is filled in and the date is required.
+      const dateOnly = issue.kind === 'missing_acquisition_date';
       return (
         <details className="manual">
           <summary>{tr.fixes.orManual}</summary>
           <form action={addOverride} className="row">
             {hidden}
             <input type="hidden" name="type" value="set_cost_basis" />
+            <input type="hidden" name="receivedAt" value={issue.params['receivedAt'] ?? ''} />
             <label>
               {tr.fixes.costBasis} ({currency})
-              <input name="costBasis" inputMode="decimal" required placeholder="0" />
+              <input
+                name="costBasis"
+                inputMode="decimal"
+                required
+                placeholder="0"
+                defaultValue={dateOnly ? issue.params['costBasis'] : undefined}
+              />
             </label>
             <label>
               {tr.fixes.acquiredAt}
-              <input name="acquiredAt" type="date" />
+              <input name="acquiredAt" type="date" required={dateOnly} />
             </label>
             <SubmitButton secondary>{tr.fixes.save}</SubmitButton>
           </form>
         </details>
       );
+    }
     case 'unmatched_withdrawal':
       return (
         <details className="manual">

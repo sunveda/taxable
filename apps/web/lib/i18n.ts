@@ -47,7 +47,7 @@ const ja = {
     seeAll: 'すべて見る',
     data: 'データ',
     accounts: (n: number) => `口座 ${n}`,
-    events: (n: number) => `取引 ${n}件`,
+    events: (n: number) => `取り込んだ行 ${n}件`,
     importMore: '取引履歴を取り込む',
     noData: 'まだ取引がありません。取引所の履歴CSVを取り込んでください。',
   },
@@ -213,6 +213,8 @@ const ja = {
         return `履歴上の保有量より ${p['shortfall']} ${p['asset']} 多く払い出しています。不足分は取得価額0円として計算しています。不足している取引履歴を取り込んでください。`;
       case 'missing_basis':
         return `外部から入庫した ${p['quantity']} ${p['asset']} の取得価額がわかりません。0円として計算しています。`;
+      case 'missing_acquisition_date':
+        return `外部から入庫した ${p['quantity']} ${p['asset']} の取得日がわかりません。保有期間を入庫日から数えているため、売却が短期として扱われる場合があります。`;
       case 'unmatched_withdrawal':
         return `${p['quantity']} ${p['asset']} が接続されていないウォレットへ出庫されました。自分のウォレットへの移動（課税なし）として扱っています。売却や支払いだった場合は課税対象です。`;
       case 'method_not_allowed':
@@ -288,7 +290,7 @@ const en: Dict = {
     seeAll: 'See all',
     data: 'Data',
     accounts: (n: number) => `${n} accounts`,
-    events: (n: number) => `${n} transactions`,
+    events: (n: number) => `${n} rows imported`,
     importMore: 'Import history',
     noData: 'No transactions yet. Import a CSV export from your exchange.',
   },

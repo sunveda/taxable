@@ -170,6 +170,7 @@ export type IssueKind =
   | 'missing_price'
   | 'negative_balance'
   | 'missing_basis'
+  | 'missing_acquisition_date'
   | 'unmatched_withdrawal'
   | 'method_not_allowed'
   | 'opening_position_mismatch'

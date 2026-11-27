@@ -91,6 +91,8 @@ export type Effect =
       accountId: AccountId;
       asset: AssetId;
       lots: { quantity: Decimal; costBasis: Decimal; acquiredAt: Timestamp }[];
+      /** The lots reallocate imported holdings, so their total must match the history. */
+      reconcile: boolean;
       ruleRefs: RuleId[];
     }
   | {
@@ -446,7 +448,30 @@ export function effectsOfEvent(ctx: EffectContext, e: LedgerEvent): Effect[] {
           impact: { min: market ? market.negated() : ZERO, max: ZERO },
           impactKnown: market !== null,
           message: `Cost basis unknown for ${e.received.quantity} ${e.received.asset} received from an external wallet; assumed 0.`,
-          params: { asset: e.received.asset, quantity: e.received.quantity },
+          // receivedAt: so a fix form can accept the arrival day itself as the date bought.
+          params: {
+            asset: e.received.asset,
+            quantity: e.received.quantity,
+            receivedAt: e.timestamp,
+          },
+        });
+      } else if (!e.acquiredAt && ctx.rules.holdingPeriod) {
+        // The basis is known but not when the coins were bought. The holding period then
+        // counts from arrival, which can turn a long-term holding short-term, so say so
+        // (`missing_basis` above already asks for the date when the basis is unknown).
+        out.push({
+          type: 'issue',
+          kind: 'missing_acquisition_date',
+          asset: e.received.asset,
+          impact: { min: ZERO, max: ZERO },
+          impactKnown: false,
+          message: `Acquisition date unknown for ${e.received.quantity} ${e.received.asset} received from an external wallet; the holding period counts from arrival, so a later sale may be reported as short-term.`,
+          params: {
+            asset: e.received.asset,
+            quantity: e.received.quantity,
+            costBasis: basis.toFixed(),
+            receivedAt: e.timestamp,
+          },
         });
       }
       out.push({
@@ -511,7 +536,16 @@ export function effectsOfOpeningPosition(
     acquiredAt: l.acquiredAt,
   }));
   if (replacesAccountLots) {
-    return [{ type: 'reset', accountId: p.accountId, asset: p.asset, lots, ruleRefs }];
+    return [
+      {
+        type: 'reset',
+        accountId: p.accountId,
+        asset: p.asset,
+        lots,
+        reconcile: p.reason === 'us_safe_harbor_2024_28',
+        ruleRefs,
+      },
+    ];
   }
   return lots.map((l) => ({
     type: 'acquire',

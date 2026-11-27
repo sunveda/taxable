@@ -169,23 +169,23 @@ export const krakenLedgersCsv: CsvImporter = {
         }
         const sent = out[0]!;
         const recv = inn[0]!;
-        const fees = real.filter((g) => !g.fee.isZero());
-        const [primaryFee, ...extraFees] = fees;
+        // Every fee is a cost of this trade, decided by leg, never by row order. A trade holds
+        // one fee: a single fee is kept as it is. With a fee on both legs, the sent leg's fee
+        // is kept and the received leg's is netted into what arrived (fewer units received,
+        // so a higher basis per unit), as a fee taken from the proceeds of a trade is.
+        const both = !sent.fee.isZero() && !recv.fee.isZero();
+        const kept = !sent.fee.isZero() ? sent : !recv.fee.isZero() ? recv : null;
+        const recvQty = both ? recv.amount.minus(recv.fee) : recv.amount;
         events.push({
           kind: 'trade',
           id,
           timestamp: first.time,
           accountId,
           sent: { asset: sent.asset, quantity: sent.amount.abs().toFixed() },
-          received: { asset: recv.asset, quantity: recv.amount.toFixed() },
-          ...(primaryFee
-            ? { fee: { asset: primaryFee.asset, quantity: primaryFee.fee.toFixed() } }
-            : {}),
+          received: { asset: recv.asset, quantity: recvQty.toFixed() },
+          ...(kept ? { fee: { asset: kept.asset, quantity: kept.fee.toFixed() } } : {}),
           sourceRef,
         });
-        extraFees.forEach((f, i) =>
-          events.push(feeEvent(`${id}:fee${i + 2}`, f, accountId, sourceRef)),
-        );
         imported += real.length;
         skipped += group.length - real.length; // KFEE fee-credit rows
         continue;
