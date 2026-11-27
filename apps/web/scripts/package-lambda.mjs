@@ -50,7 +50,15 @@ await cp(new URL('public/', web), new URL('apps/web/public/', out), { recursive:
 const run = new URL('run.sh', out);
 await writeFile(
   run,
-  '#!/bin/sh\n# Started by the Lambda Web Adapter (AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap).\nexport HOSTNAME=127.0.0.1\nexec node apps/web/server.js\n',
+  [
+    '#!/bin/sh',
+    '# Started by the Lambda Web Adapter (AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap).',
+    "# 8080 is the adapter's default port; Next's own default is 3000.",
+    'export HOSTNAME=127.0.0.1',
+    'export PORT="${PORT:-8080}"',
+    'exec node apps/web/server.js',
+    '',
+  ].join('\n'),
 );
 await chmod(run, 0o755);
 
