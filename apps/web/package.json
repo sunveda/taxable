@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:lambda": "SVDT_BUILD_TARGET=lambda next build && node scripts/package-lambda.mjs",
     "start": "next start",
     "typecheck": "next typegen && tsc -p tsconfig.json --noEmit"
   },

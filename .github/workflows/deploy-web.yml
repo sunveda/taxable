@@ -1,0 +1,71 @@
+name: Deploy web (AWS Lambda)
+
+# Builds apps/web as a standalone Next.js server and uploads it to the Lambda function
+# svdt-taxable-web, which runs it behind the AWS Lambda Web Adapter.
+# Infrastructure (function, Function URL, roles) is Terraform in sunveda/iac, `taxable/web.tf`.
+# The job runs in the "production" environment, which only main can deploy to; only that
+# environment can assume the deploy role, which can only update the taxable functions' code.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/web/**
+      - packages/**
+      - pnpm-lock.yaml
+      - .github/workflows/deploy-web.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ap-southeast-2
+      FUNCTION_NAME: svdt-taxable-web
+      DEPLOY_ROLE: arn:aws:iam::831738147814:role/github-sunveda-taxable-deploy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @svdt/web build:lambda
+      # -y keeps pnpm's relative symlinks as links; Lambda restores them.
+      - name: Package
+        working-directory: apps/web/.lambda
+        run: zip -qry ../lambda.zip .
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy
+        run: |
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --zip-file fileb://apps/web/lambda.zip \
+            --query '{version: Version, sha256: CodeSha256}' --output table
+          aws lambda wait function-updated-v2 --function-name "$FUNCTION_NAME"
+
+      - name: Smoke test
+        run: |
+          url=$(aws lambda get-function-url-config --function-name "$FUNCTION_NAME" --query FunctionUrl --output text)
+          for path in "" import report; do
+            curl --fail --silent --show-error --max-time 30 -o /dev/null -w "%{http_code} /$path\n" "${url}${path}"
+          done
+          echo "### Deployed \`$FUNCTION_NAME\`: ${url}" >> "$GITHUB_STEP_SUMMARY"
